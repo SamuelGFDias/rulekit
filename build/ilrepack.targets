@@ -1,0 +1,76 @@
+<Project>
+  <!--
+    Fusão do parser YAML dentro de Arch.Analyzer.dll via ILRepack /internalize
+    (ADR-001 D1 e §3 Opção C). Importado automaticamente pelo
+    ILRepack.Lib.MSBuild.Task através da propriedade $(ILRepackTargetsFile) —
+    ver Arch.Analyzer.csproj, onde essa propriedade aponta para este arquivo.
+
+    Quando este arquivo existe, o próprio pacote ILRepack.Lib.MSBuild.Task
+    NÃO registra o seu Target "ILRepack" default (que fundiria *todas* as
+    DLLs do diretório de saída, incluindo Microsoft.CodeAnalysis.CSharp e
+    afins — o que seria incorreto: essas DLLs são fornecidas pelo host do
+    compilador em runtime e não podem ser internalizadas). Este Target
+    substitui o default e funde explicitamente só o parser YAML.
+
+    Efeito esperado, validado no spike da Fase 0:
+      - o pacote final entrega exatamente 1 DLL em analyzers/dotnet/cs;
+      - não há mais referência pública a YamlDotNet no assembly do analyzer
+        (seus tipos viram `internal`), eliminando a classe de conflito de
+        versão descrita em roslyn#41421 (dois analyzers carregando versões
+        diferentes do mesmo assembly no host do compilador).
+  -->
+  <!--
+    IMPORTANTE: o Target abaixo NÃO pode se chamar "ILRepack". O próprio
+    ILRepack.Lib.MSBuild.Task.targets importa este arquivo e, na sequência,
+    declara o SEU PRÓPRIO <Target Name="ILRepack" .../> condicional
+    (Condition="...!Exists($(ILRepackTargetsFile))..."). Em MSBuild, quando
+    dois Targets têm o mesmo Name, o último import GANHA a definição inteira
+    — a Condition do Target só decide se ele executa, não se ele sobrescreve
+    o Target anterior de mesmo nome. Ou seja: se este Target também se
+    chamasse "ILRepack", o Target do pacote (cuja Condition dá false, porque
+    este arquivo existe) substituiria silenciosamente o nosso, e NENHUM
+    merge aconteceria — foi exatamente o que se observou no spike antes
+    desta correção (nem erro, nem log: o "Build" simplesmente terminava sem
+    invocar ILRepack). Nome dedicado evita a colisão.
+  -->
+  <Target Name="ArchAnalyzerMergeYaml" AfterTargets="Build"
+          Condition="'$(TargetFramework)' == 'netstandard2.0' and '$(DesignTimeBuild)' != 'true'">
+
+    <PropertyGroup>
+      <!-- Mesmo nome de arquivo do assembly primário, só que numa subpasta do intermediate
+           output — importante manter "$(AssemblyName).dll" (não "...merged.dll") aqui: o
+           ILRepack deriva a IDENTIDADE do assembly fundido (Assembly.GetName().Name) do nome
+           deste arquivo de saída, não do nome do arquivo final após o <Copy> abaixo. Se essa
+           etapa gravasse em "$(AssemblyName).merged.dll", o assembly final continuaria se
+           chamando "Arch.Analyzer.merged" por dentro mesmo depois de copiado/renomeado para
+           "Arch.Analyzer.dll" — divergência cosmética, mas evitável. -->
+      <ArchAnalyzerMergeDir>$(IntermediateOutputPath)ilrepack\</ArchAnalyzerMergeDir>
+      <ArchAnalyzerMergedOutput>$(ArchAnalyzerMergeDir)$(AssemblyName).dll</ArchAnalyzerMergedOutput>
+    </PropertyGroup>
+
+    <MakeDir Directories="$(ArchAnalyzerMergeDir)" Condition="!Exists('$(ArchAnalyzerMergeDir)')" />
+
+    <ItemGroup>
+      <ArchAnalyzerInputAssemblies Include="$(OutDir)$(AssemblyName).dll" />
+      <ArchAnalyzerInputAssemblies Include="$(OutDir)YamlDotNet.dll" />
+    </ItemGroup>
+
+    <Error Condition="!Exists('$(OutDir)YamlDotNet.dll')"
+           Text="ILRepack: YamlDotNet.dll não encontrado em '$(OutDir)'. Confira o PackageReference do YamlDotNet em Arch.Analyzer.csproj (precisa copiar para o output local, não só resolver em restore)." />
+
+    <ILRepack
+      InputAssemblies="@(ArchAnalyzerInputAssemblies)"
+      OutputFile="$(ArchAnalyzerMergedOutput)"
+      LibraryPath="$(OutDir)"
+      Internalize="true"
+      TargetKind="Dll"
+      DebugInfo="$(DebugSymbols)"
+      Parallel="false" />
+
+    <!-- Substitui o assembly de saída pelo resultado fundido, e remove a cópia
+         solta do YamlDotNet.dll para que sobre exatamente 1 DLL em $(OutDir)
+         (o que o `dotnet pack` depois empacota via item None em analyzers/dotnet/cs). -->
+    <Copy SourceFiles="$(ArchAnalyzerMergedOutput)" DestinationFiles="$(OutDir)$(AssemblyName).dll" />
+    <Delete Files="$(OutDir)YamlDotNet.dll;$(OutDir)YamlDotNet.pdb;$(OutDir)YamlDotNet.xml" />
+  </Target>
+</Project>

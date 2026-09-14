@@ -1,0 +1,5 @@
+# arch-rules.yaml TRIVIAL do spike da Fase 0 — não é o schema real de Arch.Config
+# (Fase 1A). Só o suficiente para ArchRulesAnalyzer.OnCompilationStart provar que lê
+# AdditionalFiles e usa YamlDotNet (internalizado) para extrair uma config simples.
+schema: arch-rules/v1
+forbiddenSuffix: Repository

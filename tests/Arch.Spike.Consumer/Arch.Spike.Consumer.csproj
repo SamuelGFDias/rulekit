@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+
+    <!-- Gate "zero AD0001 no log" (PLANO-implementacao.md, Fase 0): qualquer ID reportado que
+         não esteja em SupportedDiagnostics vira AD0001. Forçamos AD0001 a quebrar o build para
+         que a ausência dele seja verificável por exit code, não só por leitura visual do log. -->
+    <WarningsAsErrors>AD0001</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Os dois .nupkg locais de spike (ver ../_local-nuget-feed e ./NuGet.Config). -->
+    <PackageReference Include="Arch.Analyzer.Spike" Version="0.1.0-spike" />
+    <PackageReference Include="Arch.Spike.ControlAnalyzer" Version="0.1.0-spike" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Convenção manual neste spike (o build/*.targets de AdditionalFiles automático é
+         escopo do "Empacotamento" da lib real, fora do gate da Fase 0). -->
+    <AdditionalFiles Include="arch-rules.yaml" />
+  </ItemGroup>
+
+</Project>

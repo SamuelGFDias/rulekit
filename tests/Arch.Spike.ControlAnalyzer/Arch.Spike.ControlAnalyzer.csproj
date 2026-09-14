@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
+
+    <PackageId>Arch.Spike.ControlAnalyzer</PackageId>
+    <Version>0.1.0-spike</Version>
+    <Description>Analyzer de controle do spike da Fase 0 (ADR-001) — NÃO faz parte da lib, só prova ausência de FileLoadException (roslyn#41421) ao lado de Arch.Analyzer.Spike.</Description>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+    <NoWarn>$(NoWarn);NU5128;NU5100</NoWarn>
+
+    <!-- Deliberadamente NÃO referencia ILRepack.Lib.MSBuild.Task nem ILRepackTargetsFile:
+         este projeto existe justamente para carregar o YamlDotNet.dll desta versão como uma
+         DLL própria, normal, ao lado do analyzer — o oposto do que Arch.Analyzer faz. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+
+    <!-- Versão deliberadamente diferente da 13.1.0 usada (e internalizada) em Arch.Analyzer —
+         é essa diferença de versão que, sem ILRepack, dispararia roslyn#41421 se AMBOS os
+         analyzers publicassem uma cópia pública do assembly. -->
+    <PackageReference Include="YamlDotNet" Version="6.1.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Empacotamento "normal" (sem merge): o próprio YamlDotNet.dll desta versão vai junto
+         no pacote, em analyzers/dotnet/cs, como uma segunda DLL pública ao lado do analyzer. -->
+    <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="$(OutputPath)YamlDotNet.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+  </ItemGroup>
+
+</Project>

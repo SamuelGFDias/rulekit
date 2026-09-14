@@ -1,0 +1,7 @@
+root = true
+
+[*.cs]
+# Gate da Fase 0: sobrescreve a severidade default (Warning) do slot ARCH0001 pré-declarado
+# em ArchDiagnostics — prova que o .editorconfig, não o YAML, é quem decide a severidade
+# efetiva (ADR-001 D3). Com isto, a chamada não suprimida em Program.cs vira erro de build.
+dotnet_diagnostic.ARCH0001.severity = error

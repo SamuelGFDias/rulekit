@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
+
+    <!-- Empacotamento de analyzer (ADR-001 §5, "Empacotamento") -->
+    <PackageId>Arch.Analyzer.Spike</PackageId>
+    <Version>0.1.0-spike</Version>
+    <Description>Spike de viabilidade da Fase 0 (ADR-001) — NÃO é a lib final.</Description>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+    <!-- NU5128: "não há dependência de lib para netstandard2.0" — esperado para analyzer-only
+         package (IncludeBuildOutput=false). Não é um defeito a corrigir. -->
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+
+    <!-- Um netstandard2.0 "class library" comum NÃO copia DLLs de PackageReference para o
+         bin de saída por padrão (CopyLocalLockFileAssemblies=false é o default do SDK para
+         esse TFM) — só gera o .deps.json. build/ilrepack.targets precisa do YamlDotNet.dll
+         fisicamente em $(OutDir) para fundir com ILRepack, então isso é forçado aqui. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+
+    <!-- Aponta o ILRepack.Lib.MSBuild.Task para o alvo custom do repositório em vez do seu
+         Target default (ver comentário em build/ilrepack.targets). -->
+    <ILRepackTargetsFile>$(MSBuildThisFileDirectory)../../build/ilrepack.targets</ILRepackTargetsFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Fixada na menor versão suportada, PrivateAssets=all (ADR-001 §5) — fornecida pelo
+         host do compilador em runtime, não deve virar dependência nem ser fundida. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+
+    <!-- Parser YAML (ADR-001 D1) — fundido e internalizado por build/ilrepack.targets, nunca
+         distribuído como DLL própria. PrivateAssets=all + SuppressDependenciesWhenPacking
+         garantem que ele não vaza como dependência no .nuspec do pacote. -->
+    <PackageReference Include="YamlDotNet" Version="13.1.0" PrivateAssets="all" />
+
+    <!-- Executa o merge/internalize no post-build (ver ILRepackTargetsFile acima). -->
+    <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.46" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Único DLL entregue em analyzers/dotnet/cs — já é o resultado pós-ILRepack quando o
+         `dotnet pack` roda depois do `dotnet build` (o merge é AfterTargets="Build"). -->
+    <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+  </ItemGroup>
+
+</Project>

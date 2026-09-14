@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Testa o assembly REAL de Arch.Analyzer (o mesmo que é fundido/internalizado via
+      ILRepack pelo build/ilrepack.targets, já que ProjectReference dispara o Build completo
+      do projeto referenciado, AfterTargets incluído, antes de copiar a saída).
+    -->
+    <ProjectReference Include="../../src/Arch.Analyzer/Arch.Analyzer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Gate da Fase 0: confirmar se TestState.AnalyzerConfigFiles existe na versão instalada
+      de Microsoft.CodeAnalysis.CSharp.Analyzer.Testing. Resultado (documentado nos testes
+      abaixo): existe na 1.1.4 (Microsoft.CodeAnalysis.Analyzer.Testing base). O pacote
+      "...Testing.XUnit" está deprecado e não é referenciado — Microsoft.CodeAnalysis.Testing
+      já expõe Microsoft.CodeAnalysis.Testing.Verifiers.DefaultVerifier.
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" Version="1.1.4" />
+
+    <!--
+      Microsoft.CodeAnalysis.CSharp.Analyzer.Testing 1.1.4 só exige
+      Microsoft.CodeAnalysis.CSharp.Workspaces >= 1.0.1 (chão de 2014) como dependência
+      transitiva. Sem um pin explícito aqui, o restore resolve exatamente essa versão
+      antiquíssima, que conflita em runtime com o Microsoft.CodeAnalysis 4.8.0 contra o qual
+      Arch.Analyzer foi compilado (MSB3277). Pinado na mesma versão do analyzer sob teste.
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>
