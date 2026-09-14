@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Arch.Analyzer.Contracts
+namespace Arch.Config
 {
     /// <summary>
     /// Um critério de match de camada (`layers.<nome>.match[]` / `.exclude[]` no YAML,

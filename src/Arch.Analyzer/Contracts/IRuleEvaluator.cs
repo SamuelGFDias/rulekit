@@ -1,3 +1,4 @@
+using Arch.Config;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
 

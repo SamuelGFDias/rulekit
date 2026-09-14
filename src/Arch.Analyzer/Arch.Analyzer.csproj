@@ -44,6 +44,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Modelo de configuração (LayerDefinition/RuleDefinition/ArchConfig/LayerMatchCriterion),
+         dono é Arch.Config (PLANO-implementacao.md, "Estrutura do repositório"). -->
+    <ProjectReference Include="..\Arch.Config\Arch.Config.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Único DLL entregue em analyzers/dotnet/cs — já é o resultado pós-ILRepack quando o
          `dotnet pack` roda depois do `dotnet build` (o merge é AfterTargets="Build"). -->
     <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />

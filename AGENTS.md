@@ -52,28 +52,44 @@ granularidade de override por regra). Uma MSBuild task que aloca slots automatic
 
 Detalhes completos, exemplos de YAML e trade-offs: `ADR-001-motor-regras-arquiteturais.md`.
 
-## 4. Estrutura de pastas planejada
+## 4. Estrutura de pastas (real, pós-Fase 1)
 
-Copiada da seção "Estrutura do repositório (contrato de layout)" do `PLANO-implementacao.md`. Esta
-árvore ainda não existe integralmente no repo — está sendo criada pela Fase 0 (spike) em paralelo a
-este documento. **Não editar `src/`, `tests/` nem `build/` a partir deste AGENTS.md** — apenas
-descrever o contrato.
+A árvore abaixo reflete o `RuleKit.sln` de fato após a Fase 0 (spike) e a Fase 1 (fundações).
+`src/Arch.Rules/` e `src/Arch.Cli/` **ainda não existem** — são as Fases 2 e 3.
 
 ```
 src/
-  Arch.Analyzer/                 # netstandard2.0 — o DiagnosticAnalyzer + pool de slots
-  Arch.Config/                   # netstandard2.0 — modelo, parser YAML, validação de schema
-  Arch.Rules/                    # netstandard2.0 — avaliadores (um por tipo de regra)
-  Arch.Cli/                      # net10.0 — gerador de .globalconfig e lock file
+  Arch.Analyzer/                 # REAL — netstandard2.0. DiagnosticAnalyzer + pool de 512
+                                  # descriptors (ARCH0001..ARCH0512) + faixa ARCH9xxx,
+                                  # ILayerResolver real (Contracts/ILayerResolver.cs,
+                                  # LayerResolver.cs, NamespaceTrie.cs), cache de ArchConfig
+                                  # por SourceText, RuleEvaluatorRegistry (vazio até a Fase 2)
+  Arch.Config/                   # REAL — netstandard2.0, sem dependência de Roslyn. Modelo
+                                  # (ArchConfig/LayerDefinition/LayerMatchCriterion/
+                                  # RuleDefinition) + ArchConfigParser (YamlDotNet, em
+                                  # Internal/) + validação de schema
+  Arch.Rules/                    # AINDA NÃO EXISTE — Fase 2, um IRuleEvaluator por arquivo
+  Arch.Cli/                      # AINDA NÃO EXISTE — Fase 3, gerador de .globalconfig/lock file
 tests/
-  Arch.Config.Tests/             # parser puro, sem Roslyn
-  Arch.Analyzer.Tests/           # harness (código + config) -> diagnósticos
-  Arch.Benchmarks/               # regressão de performance
+  Arch.Config.Tests/             # parser puro, sem Roslyn — 9 testes
+  Arch.Analyzer.Tests/           # harness (código + config) -> diagnósticos — 52 testes
+  Arch.TestHarness/              # harness reutilizável de compilação in-memory — 2 testes próprios,
+                                  # consumido também por Arch.Analyzer.Tests
+  Arch.Benchmarks/                # esqueleto de regressão de performance (ainda sem benchmarks reais)
+  Arch.Spike.Consumer/            # artefato do spike da Fase 0 — projeto de prova de conceito que
+                                  # CONSOME o analyzer via PackageReference; não faz parte da lib
+                                  # final, não entra no pack
+  Arch.Spike.ControlAnalyzer/    # artefato do spike da Fase 0 — analyzer de controle para comparação;
+                                  # idem, não faz parte da lib final
 build/
   ilrepack.targets               # fusão + /internalize do parser YAML
+.github/
+  workflows/ci.yml               # CI: build+test+pack+smoke (jobs build-and-test, pack-and-smoke).
+                                  # Validação em host .NET Framework/Visual Studio fica FORA do
+                                  # pipeline — ver issue #1 no GitHub
 docs/
   adr/ADR-001-....md
-  schema/arch-rules.v1.json      # JSON Schema publicado
+  schema/arch-rules.v1.json      # JSON Schema publicado (ainda não existe — Fase 3)
 ```
 
 `Arch.Config` e `Arch.Rules` são fundidos em `Arch.Analyzer.dll` no pack — a separação existe para
@@ -100,15 +116,19 @@ testabilidade e paralelização entre trilhas, não para distribuição.
 
 - Fase de **design concluída**: ADR-001 e PLANO-implementacao.md aprovados (status "Proposto" no
   ADR, mas já serve de base de execução).
-- **Fase 0 (spike de viabilidade Roslyn) em andamento nesta mesma sessão**, em paralelo à criação
-  deste AGENTS.md — outro agente trabalha em `src/`, `tests/` e `build/`. É um gate bloqueante:
-  todas as fases seguintes assumem que o pool de slots funciona na prática (sem `AD0001`).
+- **Fase 0 (spike de viabilidade Roslyn) concluída** — commit `fe902e6`. Provou o pool de slots na
+  prática (sem `AD0001`) e congelou os contratos (`ILayerResolver`, `IRuleEvaluator`).
+- **Fase 1 (fundações: config-parser, analyzer-core, infra-tests) concluída** — 3 trilhas paralelas,
+  ainda não commitadas. Gate fechado: build da solução `RuleKit.sln` ok, exceto uma falha esperada/
+  por design em `Arch.Spike.Consumer` (artefato de spike, não faz parte da lib), e **63 testes
+  aprovados** no total (`Arch.Config.Tests` 9 + `Arch.Analyzer.Tests` 52 + `Arch.TestHarness` 2).
+- **Pendência conhecida:** validação em host .NET Framework/Visual Studio, ainda fora do pipeline de
+  CI — rastreada na issue https://github.com/SamuelGFDias/rulekit/issues/1.
+- **Próxima fase:** Fase 2 (tipos de regra: `forbidden-call`, `must-route-through`,
+  `naming-convention`, `max-dependencies`, em `src/Arch.Rules/`).
 
 Fases seguintes do plano (cada uma só começa com o gate da anterior fechado):
 
-- **Fase 1 — Fundações:** 3 trilhas em paralelo (parser/schema YAML em `Arch.Config`; núcleo do
-  analyzer com pool de 512 descriptors e resolução de camadas em `Arch.Analyzer`; harness de testes
-  e packaging/CI) partindo das interfaces congeladas na Fase 0.
 - **Fase 2 — Tipos de regra:** 4 trilhas paralelas implementando `IRuleEvaluator` (
   `forbidden-call`, `must-route-through` como açúcar sobre a anterior, `naming-convention`,
   `max-dependencies`), isoladas por arquivo em `src/Arch.Rules/`.
@@ -127,3 +147,35 @@ Sonnet para o grosso, Opus só onde correção semântica do Roslyn ou revisão 
 fixa contratos compartilhados (interfaces, trechos do ADR) no prompt de cada delegação. Cada fase do
 `PLANO-implementacao.md` tem um gate de saída explícito que precisa fechar — todos os itens marcados
 — antes da próxima fase começar.
+
+## 8. Contratos e convenções estabelecidos na Fase 1
+
+- **Separação de dependências entre modelo e contratos Roslyn.** O modelo de dados (`ArchConfig`,
+  `LayerDefinition`, `LayerMatchCriterion`, `RuleDefinition`) mora em `Arch.Config` e não depende de
+  Roslyn. `ILayerResolver`/`IRuleEvaluator` moram em `Arch.Analyzer.Contracts`, porque dependem de
+  tipos do Roslyn (`Compilation`, `INamedTypeSymbol` etc.) — não podiam ficar em `Arch.Config`.
+- **Ponto de entrada do parser.** `Arch.Config.ArchConfigParser.Parse(string) : ArchConfigParseResult`
+  é o único ponto de entrada. Erros de schema são `SchemaValidationError` (`Code`/`Message`/`Line`/
+  `Column`/`IsBlocking`). Um erro `IsBlocking = true` (ex.: `ARCH9001`) zera `Config` no resultado e
+  interrompe o registro de regras; um erro não bloqueante (ex.: `ARCH9003`, tipo de regra
+  desconhecido) deixa `Config` utilizável e não impede as demais regras de valerem.
+- **Faixa ARCH9xxx hoje:** `ARCH9001` (config inválida/schema, `Error`, invalida o arquivo inteiro),
+  `ARCH9002` (slot fora do pool de 512 ou duplicado entre regras, `Warning`, regra ignorada),
+  `ARCH9003` (tipo de regra desconhecido, `Warning`, regra ignorada — **hoje TODAS as regras caem
+  aqui**, porque `RuleEvaluatorRegistry` está intencionalmente vazio até a Fase 2 populá-lo com
+  avaliadores reais), `ARCH9004` (nome de tipo em `implements`/`baseType`/`attribute` não resolvido
+  via `GetTypeByMetadataName`, `Warning`, critério ignorado), `ARCH9005` (reservado para divergência
+  YAML×`.globalconfig`, `Info`, usado só a partir da Fase 3).
+- **Ponto de extensão para a Fase 2.** `RuleEvaluatorRegistry` (`src/Arch.Analyzer/
+  RuleEvaluatorRegistry.cs`) é onde a Fase 2 registra um `IRuleEvaluator` por `type` de regra
+  (`forbidden-call`, `must-route-through`, `naming-convention`, `max-dependencies`), um arquivo por
+  tipo em `src/Arch.Rules/`. O roteamento, o cache de `ArchConfig` e o resolvedor de camadas já estão
+  implementados e provados por `ArchRulesAnalyzerPipelineTests` (que registra um avaliador de teste e
+  exercita o pipeline inteiro) — popular o registro é a única mudança necessária ali.
+- **Riscos levantados nesta fase, para revisão futura (Fase 4 adversarial):**
+  - Diagnósticos de erro de config são reportados via `RegisterCompilationEndAction`; o comportamento
+    em live analysis de IDE (Error List atualizando durante digitação, não só no build) ainda não foi
+    verificado.
+  - Risco de duplicação de `ARCH9003` se a Fase 2 também passar a validar tipos de regra desconhecidos
+    dentro do parser: a checagem de `type` deve continuar sendo responsabilidade exclusiva do
+    analyzer (via `RuleEvaluatorRegistry`), nunca do parser em `Arch.Config`.

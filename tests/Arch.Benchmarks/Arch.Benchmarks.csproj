@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+
+    <!-- BenchmarkDotNet compila e roda cada [Benchmark] em processo separado (BenchmarkRunner
+         gera e builda um projeto satélite); Release é obrigatório — ele recusa medir em Debug. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+
+    <!--
+      BenchmarkDotNet 0.14.0 traz Microsoft.CodeAnalysis.Common 4.1.0 como dependência
+      transitiva (para seu diagnosticador de fontes geradas), que conflita (MSB3277/CS1705)
+      com a 4.8.0 usada por Arch.Analyzer. Pin explícito na mesma versão do analyzer sob
+      benchmark — mesmo padrão de tests/Arch.Analyzer.Tests e tests/Arch.TestHarness.
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="4.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Referencia o analyzer real para o placeholder abaixo (instanciar ArchRulesAnalyzer).
+      Este projeto só CONSOME src/Arch.Analyzer (ProjectReference), nunca edita nada sob
+      src/** — ver fronteira da trilha 1C (infra-tests) no PLANO-implementacao.md.
+    -->
+    <ProjectReference Include="../../src/Arch.Analyzer/Arch.Analyzer.csproj" />
+  </ItemGroup>
+
+</Project>

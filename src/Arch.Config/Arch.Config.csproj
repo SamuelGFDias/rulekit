@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Parser YAML (ADR-001 D1). Mesma versão de src/Arch.Analyzer/Arch.Analyzer.csproj por
+         consistência. A fusão/internalização via ILRepack no pack final é decisão de
+         empacotamento fora do escopo deste projeto (Arch.Config é fundido em Arch.Analyzer.dll
+         — PLANO-implementacao.md, "Estrutura do repositório"); por isso NÃO fixamos
+         PrivateAssets/SuppressDependenciesWhenPacking aqui, que são configuração do lado que
+         empacota. -->
+    <PackageReference Include="YamlDotNet" Version="13.1.0" />
+  </ItemGroup>
+
+</Project>

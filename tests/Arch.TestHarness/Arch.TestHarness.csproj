@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
+    <NoWarn>$(NoWarn);RS2008</NoWarn>
+
+    <!--
+      Este projeto é uma lib (consumida por Arch.Config.Tests, Arch.Analyzer.Tests e futuros
+      harnesses da Fase 2) que também carrega seus próprios testes de autoverificação
+      (SelfTests/), provando que ConfigAwareAnalyzerTest<> compila e funciona isoladamente,
+      sem depender de nenhum analyzer real de src/**. IsTestProject=true habilita o
+      xunit.runner para descobrir esses fatos.
+    -->
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Mesma versão usada em tests/Arch.Analyzer.Tests (Fase 0) — ConfigAwareAnalyzerTest<>
+      depende diretamente da mecânica de ApplyCompilationOptions dessa versão específica do
+      pacote (ver XML doc da classe).
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" Version="1.1.4" />
+
+    <!--
+      Ver comentário equivalente em tests/Arch.Analyzer.Tests/Arch.Analyzer.Tests.csproj:
+      sem este pin, o restore resolve a dependência transitiva mínima (chão de 2014) exigida
+      pelo pacote de testing acima, que conflita em runtime com Microsoft.CodeAnalysis 4.8.0
+      usado pelos analyzers sob teste (MSB3277).
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" />
+
+    <!-- Autoverificação (SelfTests/) — mesmas versões usadas em Arch.Analyzer.Tests. -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,138 @@
+name: CI
+
+# Trilha 1C (infra-tests) da Fase 1 do PLANO-implementacao.md.
+#
+# Este pipeline cobre build + test + pack + smoke de consumo em host .NET puro
+# (ubuntu-latest / dotnet CLI). A validação em host .NET Framework/Visual Studio (o outro
+# host citado no ADR-001 §5 "Empacotamento") fica DELIBERADAMENTE FORA deste pipeline:
+# GitHub Actions ubuntu-latest não tem VS instalado, e simular esse host exigiria um runner
+# windows-latest com steps adicionais (instalar VS Build Tools, abrir uma solução real na
+# IDE ou automatizar via devenv/vstest). Não implementado agora — rastreado em
+# https://github.com/SamuelGFDias/rulekit/issues/1.
+#
+# Por que "build" e "pack + smoke" são jobs/steps separados, e por que o job de build NÃO
+# roda "dotnet build RuleKit.sln" de uma vez só:
+#
+#   tests/Arch.Spike.Consumer consome Arch.Analyzer.Spike e Arch.Spike.ControlAnalyzer via
+#   PackageReference contra um feed NuGet LOCAL (tests/_local-nuget-feed), populado só pelo
+#   `dotnet pack` desses dois projetos — os .nupkg não são versionados (tests/.gitignore).
+#   Em checkout limpo, restaurar Arch.Spike.Consumer falha (NU1101) antes desse pack rodar.
+#   Por isso o job "build-and-test" restaura/builda a solução MENOS Arch.Spike.Consumer, e o
+#   job "pack-and-smoke" empacota os dois analyzers de spike primeiro e só then builda o
+#   Consumer contra o pacote recém-gerado.
+#
+#   Além disso, o build de Arch.Spike.Consumer É DESENHADO PARA FALHAR (exit code != 0): seu
+#   .editorconfig escala ARCH0001 para "error" de propósito, provando o gate da Fase 0 (ADR-001
+#   §3, pool de slots) — "o .editorconfig, não o YAML, decide a severidade efetiva". O passo de
+#   smoke abaixo trata esse "erro" de build como o resultado ESPERADO e falha o job apenas se
+#   ARCH0001 não aparecer (regra não disparou) ou se AD0001 aparecer (id fora de
+#   SupportedDiagnostics — o pool de slots quebrou, risco documentado no PLANO-implementacao.md).
+#
+# RuleKit.sln (raiz do repo, gerado via `dotnet new sln` + `dotnet sln add`) continua listando
+# todos os projetos, Arch.Spike.Consumer incluído — é o inventário de projetos do repositório
+# para uso local/IDE; o CI só não invoca `dotnet build`/`dotnet restore` nele de uma vez por
+# causa da dependência de ordem acima.
+
+on:
+  push:
+  pull_request:
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+
+jobs:
+  build-and-test:
+    name: Build + Test (tudo exceto Arch.Spike.Consumer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: |
+          set -euo pipefail
+          for proj in \
+            src/Arch.Analyzer/Arch.Analyzer.csproj \
+            src/Arch.Config/Arch.Config.csproj \
+            tests/Arch.Analyzer.Tests/Arch.Analyzer.Tests.csproj \
+            tests/Arch.Spike.ControlAnalyzer/Arch.Spike.ControlAnalyzer.csproj \
+            tests/Arch.TestHarness/Arch.TestHarness.csproj \
+            tests/Arch.Benchmarks/Arch.Benchmarks.csproj; do
+            dotnet restore "$proj"
+          done
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          for proj in \
+            src/Arch.Analyzer/Arch.Analyzer.csproj \
+            src/Arch.Config/Arch.Config.csproj \
+            tests/Arch.Analyzer.Tests/Arch.Analyzer.Tests.csproj \
+            tests/Arch.Spike.ControlAnalyzer/Arch.Spike.ControlAnalyzer.csproj \
+            tests/Arch.TestHarness/Arch.TestHarness.csproj \
+            tests/Arch.Benchmarks/Arch.Benchmarks.csproj; do
+            dotnet build "$proj" --configuration Release --no-restore
+          done
+
+      - name: Test
+        run: |
+          set -euo pipefail
+          dotnet test tests/Arch.Analyzer.Tests/Arch.Analyzer.Tests.csproj --configuration Release --no-build
+          dotnet test tests/Arch.TestHarness/Arch.TestHarness.csproj --configuration Release --no-build
+
+  pack-and-smoke:
+    name: Pack Arch.Analyzer + smoke de consumo (Arch.Spike.Consumer)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Pack Arch.Analyzer.Spike + Arch.Spike.ControlAnalyzer no feed local
+        run: |
+          set -euo pipefail
+          dotnet pack src/Arch.Analyzer/Arch.Analyzer.csproj \
+            --configuration Release \
+            --output tests/_local-nuget-feed
+          dotnet pack tests/Arch.Spike.ControlAnalyzer/Arch.Spike.ControlAnalyzer.csproj \
+            --configuration Release \
+            --output tests/_local-nuget-feed
+
+      - name: Smoke de consumo — build de Arch.Spike.Consumer contra o pacote recém-gerado
+        run: |
+          set -uo pipefail
+          dotnet build tests/Arch.Spike.Consumer/Arch.Spike.Consumer.csproj \
+            --configuration Release \
+            > consumer-build.log 2>&1
+          build_exit=$?
+          cat consumer-build.log
+
+          # Resultado ESPERADO: build falha (exit != 0) com ARCH0001 — ver comentário no
+          # topo deste arquivo. AD0001 (id fora de SupportedDiagnostics) NUNCA pode aparecer:
+          # seria o pool de slots do ADR-001 §3 quebrado.
+          if grep -q "AD0001" consumer-build.log; then
+            echo "SMOKE FALHOU: AD0001 apareceu — pool de slots (ADR-001) quebrado." >&2
+            exit 1
+          fi
+
+          if ! grep -q "error ARCH0001" consumer-build.log; then
+            echo "SMOKE FALHOU: ARCH0001 esperado não apareceu como erro de build." >&2
+            exit 1
+          fi
+
+          if [ "$build_exit" -eq 0 ]; then
+            echo "SMOKE FALHOU: build de Arch.Spike.Consumer deveria falhar (ARCH0001 como error via .editorconfig) mas teve exit 0." >&2
+            exit 1
+          fi
+
+          echo "Smoke OK: ARCH0001 disparou como esperado via .editorconfig, sem AD0001."
