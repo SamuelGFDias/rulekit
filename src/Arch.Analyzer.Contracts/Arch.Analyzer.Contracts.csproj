@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Fixada na menor versão suportada, PrivateAssets=all (mesma versão usada em todo o
+         repo) — fornecida pelo host do compilador em runtime, não deve virar dependência nem
+         ser fundida. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- IRuleEvaluator.RegisterActions usa RuleDefinition, que mora em Arch.Config. -->
+    <ProjectReference Include="../Arch.Config/Arch.Config.csproj" />
+  </ItemGroup>
+
+</Project>

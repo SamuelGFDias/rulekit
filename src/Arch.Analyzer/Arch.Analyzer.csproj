@@ -47,6 +47,14 @@
     <!-- Modelo de configuração (LayerDefinition/RuleDefinition/ArchConfig/LayerMatchCriterion),
          dono é Arch.Config (PLANO-implementacao.md, "Estrutura do repositório"). -->
     <ProjectReference Include="..\Arch.Config\Arch.Config.csproj" />
+
+    <!-- Contratos IRuleEvaluator/ILayerResolver, extraídos para projeto próprio (sem depender
+         de Arch.Analyzer) para quebrar o ciclo Arch.Analyzer <-> Arch.Rules. Implementados em
+         LayerResolver.cs e consumidos em ArchRulesAnalyzer.cs/RuleEvaluatorRegistry.cs. -->
+    <ProjectReference Include="..\Arch.Analyzer.Contracts\Arch.Analyzer.Contracts.csproj" />
+
+    <!-- Avaliadores concretos de regra (Fase 2), instanciados em RuleEvaluatorRegistry.Default. -->
+    <ProjectReference Include="..\Arch.Rules\Arch.Rules.csproj" />
   </ItemGroup>
 
   <ItemGroup>
