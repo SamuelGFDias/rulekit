@@ -12,7 +12,13 @@ namespace Arch.Analyzer.Tests
     /// </summary>
     public class ArchDiagnosticsTests
     {
-        private static readonly string[] EngineIds = { "ARCH9001", "ARCH9002", "ARCH9003", "ARCH9004", "ARCH9005" };
+        // ARCH9006/ARCH9007 entraram com a resolução de `extends` dentro do analyzer: um código de
+        // motor que não esteja aqui (e, portanto, em SupportedDiagnostics) nunca chega à Error List —
+        // vira AD0001 silencioso, o modo de falha que esta classe inteira existe para vigiar.
+        private static readonly string[] EngineIds =
+        {
+            "ARCH9001", "ARCH9002", "ARCH9003", "ARCH9004", "ARCH9005", "ARCH9006", "ARCH9007"
+        };
 
         [Fact]
         public void Declara_512_slots_mais_a_faixa_reservada_do_motor()
@@ -74,6 +80,8 @@ namespace Arch.Analyzer.Tests
             Assert.Equal(DiagnosticSeverity.Warning, byId["ARCH9002"].DefaultSeverity);
             Assert.Equal(DiagnosticSeverity.Warning, byId["ARCH9003"].DefaultSeverity);
             Assert.Equal(DiagnosticSeverity.Warning, byId["ARCH9004"].DefaultSeverity);
+            Assert.Equal(DiagnosticSeverity.Warning, byId["ARCH9006"].DefaultSeverity);
+            Assert.Equal(DiagnosticSeverity.Warning, byId["ARCH9007"].DefaultSeverity);
         }
 
         [Fact]

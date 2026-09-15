@@ -127,5 +127,26 @@ namespace Arch.Config
 
             return new ArchConfigParseResult(config, merged.Errors);
         }
+
+        /// <summary>
+        /// Extrai só a lista de <c>extends:</c> de um texto YAML, sem validar o restante do schema
+        /// (a validação completa acontece em <see cref="Parse(IReadOnlyList{string})"/> depois que a
+        /// cadeia inteira for resolvida). Usado por Arch.Analyzer para descobrir, ANTES de montar a
+        /// lista de textos em ordem de precedência, quais outros AdditionalFiles precisa localizar
+        /// (ele não pode ler do disco — RS1035). Retorna lista vazia se não houver <c>extends:</c>
+        /// ou se o YAML for inválido demais para nem isso ser extraído (nesse caso o erro real
+        /// aparece de qualquer forma quando o texto entrar em <c>Parse</c>).
+        /// </summary>
+        /// <remarks>
+        /// Os caminhos são devolvidos EXATAMENTE como escritos no YAML (relativos ao diretório do
+        /// arquivo que os declara, ADR-001 D2). Resolver esses caminhos é responsabilidade de quem
+        /// chama — no analyzer, manipulação puramente textual de caminho contra
+        /// <c>context.Options.AdditionalFiles</c>; no CLI, I/O de disco real
+        /// (<c>Arch.Cli.ExtendsResolver</c>).
+        /// </remarks>
+        public static IReadOnlyList<string> PeekExtends(string yamlText)
+        {
+            return ArchConfigDocumentParser.PeekExtends(yamlText);
+        }
     }
 }

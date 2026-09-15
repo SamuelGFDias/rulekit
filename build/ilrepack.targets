@@ -1,16 +1,17 @@
 <Project>
   <!--
-    Fusão do parser YAML dentro de Arch.Analyzer.dll via ILRepack /internalize
-    (ADR-001 D1 e §3 Opção C). Importado automaticamente pelo
-    ILRepack.Lib.MSBuild.Task através da propriedade $(ILRepackTargetsFile) —
-    ver Arch.Analyzer.csproj, onde essa propriedade aponta para este arquivo.
+    Fusão do parser YAML + das libs internas dentro de Arch.Analyzer.dll via
+    ILRepack /internalize (ADR-001 D1 e §3 Opção C). Importado automaticamente
+    pelo ILRepack.Lib.MSBuild.Task através da propriedade $(ILRepackTargetsFile)
+    — ver Arch.Analyzer.csproj, onde essa propriedade aponta para este arquivo.
 
     Quando este arquivo existe, o próprio pacote ILRepack.Lib.MSBuild.Task
     NÃO registra o seu Target "ILRepack" default (que fundiria *todas* as
     DLLs do diretório de saída, incluindo Microsoft.CodeAnalysis.CSharp e
     afins — o que seria incorreto: essas DLLs são fornecidas pelo host do
     compilador em runtime e não podem ser internalizadas). Este Target
-    substitui o default e funde explicitamente só o parser YAML.
+    substitui o default e funde explicitamente só o que o pacote precisa
+    entregar: YamlDotNet + Arch.Config + Arch.Analyzer.Contracts + Arch.Rules.
 
     Efeito esperado, validado no spike da Fase 0:
       - o pacote final entrega exatamente 1 DLL em analyzers/dotnet/cs;
@@ -33,30 +34,107 @@
     desta correção (nem erro, nem log: o "Build" simplesmente terminava sem
     invocar ILRepack). Nome dedicado evita a colisão.
   -->
-  <Target Name="ArchAnalyzerMergeYaml" AfterTargets="Build"
-          Condition="'$(TargetFramework)' == 'netstandard2.0' and '$(DesignTimeBuild)' != 'true'">
+  <!--
+    POR QUE ESTE TARGET RODA SÓ NO PACK (BeforeTargets="_GetPackageFiles") E
+    NÃO MAIS NO BUILD (AfterTargets="Build"):
+
+    A versão anterior deste arquivo rodava com AfterTargets="Build" e
+    SOBRESCREVIA $(OutDir)$(AssemblyName).dll pelo resultado fundido. Isso
+    quebra qualquer projeto do repositório que referencie Arch.Analyzer via
+    ProjectReference (tests/Arch.Analyzer.Tests, tests/Arch.Benchmarks),
+    porque um ProjectReference dispara o Build completo do projeto
+    referenciado — AfterTargets incluído. O projeto consumidor passava então
+    a enxergar DUAS cópias físicas dos mesmos tipos:
+
+      1. Arch.Config.RuleDefinition (public) vindo do ProjectReference
+         transitivo a Arch.Config.csproj;
+      2. a cópia INTERNALIZADA do MESMO tipo, agora fisicamente dentro do
+         Arch.Analyzer.dll fundido — visível para Arch.Analyzer.Tests por
+         causa do [assembly: InternalsVisibleTo("Arch.Analyzer.Tests")] em
+         src/Arch.Analyzer/AssemblyInfo.cs.
+
+    Dois tipos físicos distintos com mesmo namespace+nome, ambos acessíveis
+    => CS0433 ("o tipo X existe em A e em B") em ~26 pontos do projeto de
+    teste. O problema não existia enquanto só YamlDotNet era fundido, porque
+    nenhum projeto do repo referencia YamlDotNet via ProjectReference.
+
+    Correção: o merge/internalize é uma etapa de EMPACOTAMENTO, não de
+    compilação. Ele passa a rodar apenas em `dotnet pack` / `msbuild -t:Pack`,
+    grava num caminho de estado intermediário dedicado ($(ArchAnalyzerMergeDir),
+    abaixo) e NUNCA toca em $(OutDir). Depois de um `dotnet build` comum,
+    bin/Release/netstandard2.0 volta a conter as DLLs soltas normais de
+    qualquer projeto netstandard2.0 com ProjectReference — que é exatamente o
+    que os projetos de teste precisam enxergar.
+
+    Por que "_GetPackageFiles": é o Target do SDK do NuGet que varre
+    @(None)/@(Content)/... com Pack="true" para montar a lista de arquivos do
+    .nuspec. É o ponto de extensão documentado para injetar arquivos de pacote
+    dinamicamente. Ele só entra no grafo via o Target Pack
+    ($(GenerateNuspecDependsOn) = "Build; _LoadPackInputItems;
+    _GetTargetFrameworksOutput; _WalkEachTargetPerFramework; _GetPackageFiles;
+    ..."), portanto: (a) nunca dispara num `dotnet build` comum nem por
+    ProjectReference, e (b) quando dispara, o Build normal JÁ rodou, então as
+    5 DLLs de entrada estão em $(OutDir), intocadas.
+
+    A checagem de '$(DesignTimeBuild)' != 'true' que existia aqui foi REMOVIDA
+    por ter virado código morto: ela protegia contra o merge rodar no build de
+    design-time da IDE, que só existe no caminho do Build. Um build de
+    design-time nunca invoca o Target Pack, logo nunca alcança
+    _GetPackageFiles. A checagem de TargetFramework foi mantida — ela continua
+    válida como guarda caso o projeto passe a multi-targetar no futuro.
+  -->
+  <Target Name="ArchAnalyzerMergeForPack" BeforeTargets="_GetPackageFiles"
+          Condition="'$(TargetFramework)' == 'netstandard2.0'">
 
     <PropertyGroup>
-      <!-- Mesmo nome de arquivo do assembly primário, só que numa subpasta do intermediate
-           output — importante manter "$(AssemblyName).dll" (não "...merged.dll") aqui: o
-           ILRepack deriva a IDENTIDADE do assembly fundido (Assembly.GetName().Name) do nome
-           deste arquivo de saída, não do nome do arquivo final após o <Copy> abaixo. Se essa
-           etapa gravasse em "$(AssemblyName).merged.dll", o assembly final continuaria se
-           chamando "Arch.Analyzer.merged" por dentro mesmo depois de copiado/renomeado para
-           "Arch.Analyzer.dll" — divergência cosmética, mas evitável. -->
-      <ArchAnalyzerMergeDir>$(IntermediateOutputPath)ilrepack\</ArchAnalyzerMergeDir>
+      <!-- Estado intermediário DEDICADO ao empacotamento. Pasta própria
+           ("pack-merge", não a antiga "ilrepack") para deixar explícito que o
+           artefato aqui dentro é só-de-pacote e nunca deve ser copiado para
+           $(OutDir) nem consumido por um ProjectReference.
+
+           Mantém-se "$(AssemblyName).dll" (não "...merged.dll") como nome do
+           arquivo: o ILRepack deriva a IDENTIDADE do assembly fundido
+           (Assembly.GetName().Name) do nome deste arquivo de saída. Se
+           gravasse em "$(AssemblyName).merged.dll", o assembly dentro do
+           .nupkg se chamaria "Arch.Analyzer.merged" por dentro mesmo estando
+           no caminho analyzers/dotnet/cs/Arch.Analyzer.dll. -->
+      <ArchAnalyzerMergeDir>$(IntermediateOutputPath)pack-merge\</ArchAnalyzerMergeDir>
       <ArchAnalyzerMergedOutput>$(ArchAnalyzerMergeDir)$(AssemblyName).dll</ArchAnalyzerMergedOutput>
     </PropertyGroup>
 
     <MakeDir Directories="$(ArchAnalyzerMergeDir)" Condition="!Exists('$(ArchAnalyzerMergeDir)')" />
 
     <ItemGroup>
+      <!-- ORDEM IMPORTA: o primeiro item é o assembly PRIMÁRIO — é dele que o ILRepack herda a
+           identidade (nome, versão, atributos de assembly) do resultado. -->
       <ArchAnalyzerInputAssemblies Include="$(OutDir)$(AssemblyName).dll" />
       <ArchAnalyzerInputAssemblies Include="$(OutDir)YamlDotNet.dll" />
+
+      <!-- Saídas dos ProjectReference (Arch.Config, Arch.Analyzer.Contracts, Arch.Rules). O SDK as
+           copia normalmente para $(OutDir) em netstandard2.0 e elas CONTINUAM lá depois deste
+           Target — mas o pacote entrega UMA só DLL em analyzers/dotnet/cs. Sem fundi-las aqui, o
+           consumidor do .nupkg receberia TypeLoadException/FileNotFoundException em runtime (o
+           analyzer chama ArchConfigParser, IRuleEvaluator e os avaliadores concretos, que não
+           estariam fisicamente presentes). AGENTS.md §4 já declara que "Arch.Config e Arch.Rules são
+           fundidos em Arch.Analyzer.dll no pack": é este item que torna isso verdade. -->
+      <ArchAnalyzerInputAssemblies Include="$(OutDir)Arch.Config.dll" />
+      <ArchAnalyzerInputAssemblies Include="$(OutDir)Arch.Analyzer.Contracts.dll" />
+      <ArchAnalyzerInputAssemblies Include="$(OutDir)Arch.Rules.dll" />
     </ItemGroup>
 
+    <!-- Sanidade das 5 entradas. Relevante sobretudo quando se passa a flag NoBuild ao
+         `dotnet pack`, caso em que o Build não roda como dependência e $(OutDir) pode estar
+         vazio ou desatualizado. -->
+    <Error Condition="!Exists('$(OutDir)$(AssemblyName).dll')"
+           Text="ILRepack: $(AssemblyName).dll não encontrado em '$(OutDir)'. O Pack espera o Build normal já feito — rode `dotnet build` antes de `dotnet pack --no-build`." />
     <Error Condition="!Exists('$(OutDir)YamlDotNet.dll')"
-           Text="ILRepack: YamlDotNet.dll não encontrado em '$(OutDir)'. Confira o PackageReference do YamlDotNet em Arch.Analyzer.csproj (precisa copiar para o output local, não só resolver em restore)." />
+           Text="ILRepack: YamlDotNet.dll não encontrado em '$(OutDir)'. Confira o PackageReference do YamlDotNet em Arch.Analyzer.csproj (precisa copiar para o output local, não só resolver em restore — ver CopyLocalLockFileAssemblies)." />
+    <Error Condition="!Exists('$(OutDir)Arch.Config.dll')"
+           Text="ILRepack: Arch.Config.dll não encontrado em '$(OutDir)'. Confira o ProjectReference de Arch.Config em Arch.Analyzer.csproj — sem essa DLL fundida o .nupkg entrega um analyzer que quebra em runtime." />
+    <Error Condition="!Exists('$(OutDir)Arch.Analyzer.Contracts.dll')"
+           Text="ILRepack: Arch.Analyzer.Contracts.dll não encontrado em '$(OutDir)'. Confira o ProjectReference de Arch.Analyzer.Contracts em Arch.Analyzer.csproj — sem essa DLL fundida o .nupkg entrega um analyzer que quebra em runtime." />
+    <Error Condition="!Exists('$(OutDir)Arch.Rules.dll')"
+           Text="ILRepack: Arch.Rules.dll não encontrado em '$(OutDir)'. Confira o ProjectReference de Arch.Rules em Arch.Analyzer.csproj — sem essa DLL fundida o .nupkg entrega um analyzer que quebra em runtime." />
 
     <ILRepack
       InputAssemblies="@(ArchAnalyzerInputAssemblies)"
@@ -67,10 +145,14 @@
       DebugInfo="$(DebugSymbols)"
       Parallel="false" />
 
-    <!-- Substitui o assembly de saída pelo resultado fundido, e remove a cópia
-         solta do YamlDotNet.dll para que sobre exatamente 1 DLL em $(OutDir)
-         (o que o `dotnet pack` depois empacota via item None em analyzers/dotnet/cs). -->
-    <Copy SourceFiles="$(ArchAnalyzerMergedOutput)" DestinationFiles="$(OutDir)$(AssemblyName).dll" />
-    <Delete Files="$(OutDir)YamlDotNet.dll;$(OutDir)YamlDotNet.pdb;$(OutDir)YamlDotNet.xml" />
+    <!-- Injeta o resultado fundido na lista de arquivos do pacote. Este é o ÚNICO item que coloca
+         uma DLL em analyzers/dotnet/cs — o Arch.Analyzer.csproj não declara mais nenhum <None>
+         estático apontando para $(OutputPath)$(AssemblyName).dll (aquele empacotava o assembly NÃO
+         fundido). Precisa estar depois do <ILRepack/> dentro do MESMO Target e antes de
+         _GetPackageFiles, que é quem varre @(None) com Pack="true". -->
+    <ItemGroup>
+      <None Include="$(ArchAnalyzerMergedOutput)"
+            Pack="true" PackagePath="analyzers/dotnet/cs/$(AssemblyName).dll" Visible="false" />
+    </ItemGroup>
   </Target>
 </Project>

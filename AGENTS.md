@@ -52,10 +52,11 @@ granularidade de override por regra). Uma MSBuild task que aloca slots automatic
 
 Detalhes completos, exemplos de YAML e trade-offs: `ADR-001-motor-regras-arquiteturais.md`.
 
-## 4. Estrutura de pastas (real, pós-Fase 3)
+## 4. Estrutura de pastas (real, pós-Fase 4 — v1 fechado)
 
 A árvore abaixo reflete o `RuleKit.sln` de fato após a Fase 0 (spike), a Fase 1 (fundações), a
-Fase 2 (tipos de regra) e a Fase 3 (ergonomia — CLI e documentação).
+Fase 2 (tipos de regra), a Fase 3 (ergonomia — CLI e documentação) e a Fase 4 (verificação —
+dogfooding, revisão adversarial, performance).
 
 ```
 src/
@@ -97,14 +98,34 @@ tests/
   Arch.Cli.Tests/                # REAL — Fase 3, testes do CLI (gen/validate) — 8 testes
   Arch.TestHarness/              # harness reutilizável de compilação in-memory — 2 testes próprios,
                                   # consumido também por Arch.Analyzer.Tests
-  Arch.Benchmarks/                # esqueleto de regressão de performance (ainda sem benchmarks reais)
+  Arch.Benchmarks/                # REAL — Fase 4, benchmarks de performance de fato
+                                  # (ConfigCacheBenchmarks.cs, LayerResolverMemoizationBenchmarks.cs):
+                                  # confirmam que a memoização do LayerResolver é ~23x mais rápida e
+                                  # aloca ~1750x menos que classificar símbolos sem cache, e que o
+                                  # cache de config elimina o reparsing do YAML.
+  Arch.Dogfood/                   # REAL — Fase 4 (trilha 4A). `Arch.Dogfood.Sample/` consome o
+                                  # analyzer via `.nupkg` real (não ProjectReference) — 19 arquivos-
+                                  # fonte, 5 camadas, os 4 tipos de regra — para validar o pacote de
+                                  # ponta a ponta como um consumidor externo veria.
   Arch.Spike.Consumer/            # artefato do spike da Fase 0 — projeto de prova de conceito que
                                   # CONSOME o analyzer via PackageReference; não faz parte da lib
                                   # final, não entra no pack
   Arch.Spike.ControlAnalyzer/    # artefato do spike da Fase 0 — analyzer de controle para comparação;
                                   # idem, não faz parte da lib final
 build/
-  ilrepack.targets               # fusão + /internalize do parser YAML
+  ilrepack.targets               # REAL — Fase 4 corrigiu o timing crítico: funde as 5 dependências
+                                  # (Arch.Analyzer + YamlDotNet + Arch.Config +
+                                  # Arch.Analyzer.Contracts + Arch.Rules) com /internalize, e roda
+                                  # SÓ durante `dotnet pack` (hook BeforeTargets="_GetPackageFiles"),
+                                  # nunca num `dotnet build` comum — assim projetos que referenciam
+                                  # Arch.Analyzer via ProjectReference (testes, benchmarks) nunca
+                                  # veem o assembly fundido/internalizado, o que antes causava
+                                  # colisão de tipos CS0433.
+  Arch.Analyzer.targets           # REAL — Fase 4, empacotado em `build/` no .nupkg. Adiciona
+                                  # `arch-rules.yaml` e `arch-rules.*.yaml` a @(AdditionalFiles)
+                                  # automaticamente em qualquer projeto que instale o pacote — sem
+                                  # isso, instalar o pacote e criar o YAML não bastava (o analyzer
+                                  # saía pela porta rápida silenciosamente, sem diagnóstico).
 .github/
   workflows/ci.yml               # CI: build+test+pack+smoke (jobs build-and-test, pack-and-smoke).
                                   # Validação em host .NET Framework/Visual Studio fica FORA do
@@ -138,24 +159,35 @@ testabilidade e paralelização entre trilhas, não para distribuição.
 
 ## 6. Estado atual do projeto
 
-- Fase de **design concluída**: ADR-001 e PLANO-implementacao.md aprovados (status "Proposto" no
-  ADR, mas já serve de base de execução).
+**Fases 0-4 concluídas — v1 completo do PLANO-implementacao.md fechado.** Gate final: **109 testes
+aprovados** (`Arch.Config.Tests` 9 + `Arch.Analyzer.Tests` 60 + `Arch.Rules.Tests` 30 +
+`Arch.Cli.Tests` 8 + `Arch.TestHarness` 2), 0 falhas.
+
+Dois defeitos críticos encontrados pela revisão adversarial da Fase 4 e corrigidos antes de fechar
+o v1:
+- (a) o pacote não incluía `build/*.targets` para registrar `arch-rules.yaml` automaticamente —
+  corrigido com `build/Arch.Analyzer.targets` (ver seção 4);
+- (b) o analyzer não resolvia `extends:` (só o CLI resolvia) — corrigido, com a convenção de nome
+  `arch-rules.*.yaml` para resolução automática via `AdditionalFiles` (ver seção 8).
+
+Pendência conhecida remanescente: validação em host .NET Framework/Visual Studio — rastreada na
+issue https://github.com/SamuelGFDias/rulekit/issues/1; não foi possível verificar em nenhuma fase
+neste ambiente Linux.
+
 - **Fase 0 (spike de viabilidade Roslyn) concluída** — commit `fe902e6`. Provou o pool de slots na
   prática (sem `AD0001`) e congelou os contratos (`ILayerResolver`, `IRuleEvaluator`).
 - **Fase 1 (fundações: config-parser, analyzer-core, infra-tests) concluída** — commit `73e9bf4`.
 - **Fase 2 (tipos de regra) concluída** — `RuleEvaluatorRegistry.Default`
   (`src/Arch.Analyzer/RuleEvaluatorRegistry.cs`) está populado com os 4 tipos de regra do ADR-001:
   `forbidden-call`, `must-route-through`, `naming-convention`, `max-dependencies`.
-- **Fase 3 (ergonomia — CLI e documentação) concluída** — gate completo fechado com **102 testes
-  aprovados** no total (`Arch.Config.Tests` 9 + `Arch.Cli.Tests` 8 + `Arch.TestHarness` 2 +
-  `Arch.Analyzer.Tests` 53 + `Arch.Rules.Tests` 30), 0 falhas. CLI `arch-rules gen`/`validate`
-  funcional — testado manualmente pelo arquiteto de ponta a ponta contra um YAML real. A única falha
-  de build conhecida e esperada continua sendo `tests/Arch.Spike.Consumer` (artefato do spike da
-  Fase 0, não faz parte da lib final).
-- **Pendência conhecida:** validação em host .NET Framework/Visual Studio, ainda fora do pipeline de
-  CI — rastreada na issue https://github.com/SamuelGFDias/rulekit/issues/1.
-- **Próxima fase:** Fase 4 (verificação — dogfooding, revisão adversarial, auditoria de
-  performance).
+- **Fase 3 (ergonomia — CLI e documentação) concluída** — CLI `arch-rules gen`/`validate`
+  funcional — testado manualmente pelo arquiteto de ponta a ponta contra um YAML real.
+- **Fase 4 (verificação — dogfooding, revisão adversarial, auditoria de performance) concluída** —
+  dogfooding real via `.nupkg` em `tests/Arch.Dogfood/`, benchmarks reais de memoização/alocação em
+  `tests/Arch.Benchmarks/`, correção crítica de timing do ILRepack (só no `dotnet pack`) e do
+  empacotamento de `build/*.targets`, `extends` funcionando no analyzer real. Gate final verificado
+  pelo arquiteto de forma independente, incluindo testes manuais isolados fora do repo confirmando
+  F1 (diagnóstico aparece sem editar `.csproj`) e F2 (`extends` funciona no analyzer).
 
 Fases seguintes do plano (cada uma só começa com o gate da anterior fechado):
 
@@ -236,3 +268,32 @@ fixa contratos compartilhados (interfaces, trechos do ADR) no prompt de cada del
     desconhecidos dentro do parser: a checagem de `type` deve continuar sendo responsabilidade
     exclusiva do
     analyzer (via `RuleEvaluatorRegistry`), nunca do parser em `Arch.Config`.
+- **`ArchConfigParser.PeekExtends(string yamlText) : IReadOnlyList<string>`** (API pública, Fase 4,
+  `src/Arch.Config/ArchConfigParser.cs`) — extrai só a lista declarada em `extends:` de um YAML,
+  sem fazer o parse completo do schema. É o que permite ao analyzer (que não pode fazer I/O de
+  disco, RS1035) descobrir quais outros `AdditionalFiles` fazem parte da cadeia de `extends` de um
+  arquivo, resolvendo-a inteiramente a partir do que o MSBuild já forneceu.
+- **`ARCH9006`** (warning, não bloqueante) — um caminho declarado em `extends:` não tem
+  `AdditionalFile` correspondente na compilação; a camada ausente é ignorada e o resto da cadeia
+  continua valendo. **`ARCH9007`** (warning, não bloqueante) — cadeia de `extends` inválida (ciclo,
+  ou profundidade acima do limite do resolvedor); o ramo problemático é cortado. Ambos reportados só
+  pelo analyzer (`ArchRulesAnalyzer.cs`), nunca pelo parser em `Arch.Config` — descrevem a resolução
+  contra `@(AdditionalFiles)`, que é integração, não schema.
+- **Convenção de nome `arch-rules.*.yaml` para resolução automática de `extends`.** Só arquivos
+  nesse padrão (ao lado do `.csproj`, exceto o próprio `arch-rules.yaml` e o `arch-rules.lock.yaml`
+  gerado pelo CLI) entram automaticamente em `@(AdditionalFiles)` via `build/Arch.Analyzer.targets`.
+  Um arquivo de `extends` fora dessa convenção (nome ou diretório diferentes) precisa de
+  `<AdditionalFiles Include="..." />` manual no `.csproj` do consumidor; sem isso o analyzer reporta
+  `ARCH9006` dizendo exatamente qual caminho faltou.
+
+## 9. v1 fechado — itens de limpeza opcionais para o futuro
+
+- `tests/Arch.Spike.Consumer/` e `tests/Arch.Spike.ControlAnalyzer/` são artefatos da Fase 0 e
+  referenciam o `PackageId` antigo (`Arch.Analyzer.Spike`/`0.1.0-spike`, hoje `Arch.Analyzer`/
+  `0.1.0`) — candidatos a remoção ou atualização; não fazem parte da lib final.
+- A linha manual `<AdditionalFiles Include="arch-rules.yaml" />` em
+  `tests/Arch.Dogfood/Arch.Dogfood.Sample.csproj` ficou redundante depois da correção de F1
+  (`build/Arch.Analyzer.targets` já cobre isso automaticamente) — inofensiva, mas pode ser removida.
+- O contorno por reflexão em `tests/Arch.Benchmarks` (documentado na trilha 4C), usado para lidar
+  com tipos duplicados via `ProjectReference`, deixou de ser necessário depois da correção do timing
+  do ILRepack (agora só roda no `dotnet pack`) — pode ser simplificado.

@@ -163,6 +163,50 @@ namespace Arch.Config.Internal
             return true;
         }
 
+        /// <summary>
+        /// Extrai SÓ a lista de `extends:` de um texto YAML, reaproveitando integralmente
+        /// <see cref="ParseExtends"/> — a extração não é duplicada, para que a forma aceita de
+        /// `extends` (lista de escalares) tenha uma única fonte de verdade.
+        ///
+        /// <para>Deliberadamente NÃO roda <see cref="YamlSubsetGuard"/> nem valida o resto do
+        /// schema: quem chama (Arch.Analyzer) precisa desta informação ANTES de ter a cadeia
+        /// completa de textos, e a validação de verdade acontece depois, em
+        /// <see cref="ArchConfigParser.Parse(IReadOnlyList{string})"/>, sobre a cadeia inteira. Um
+        /// YAML inválido demais para ter o `extends` extraído devolve lista vazia — o erro real
+        /// (ARCH9001, com linha/coluna) aparece de qualquer forma quando o texto entrar em
+        /// <c>Parse</c>.</para>
+        /// </summary>
+        internal static IReadOnlyList<string> PeekExtends(string yamlText)
+        {
+            try
+            {
+                var stream = new YamlStream();
+                stream.Load(new StringReader(yamlText ?? string.Empty));
+
+                if (stream.Documents.Count == 0 || !(stream.Documents[0].RootNode is YamlMappingNode root))
+                {
+                    return Array.Empty<string>();
+                }
+
+                var probe = new ParsedDocument();
+                if (!ParseExtends(root, probe))
+                {
+                    // `extends` presente mas malformado (não é lista, item não escalar): não há o
+                    // que resolver. O erro bloqueante correspondente será reportado pelo Parse real.
+                    return Array.Empty<string>();
+                }
+
+                return probe.Extends ?? Array.Empty<string>();
+            }
+            catch (Exception)
+            {
+                // YAML sintaticamente inválido (YamlException) ou qualquer outra falha do modelo de
+                // representação. Ver o parágrafo sobre isso no XML doc acima: nunca é papel deste
+                // método reportar erro.
+                return Array.Empty<string>();
+            }
+        }
+
         private static bool ParseExtends(YamlMappingNode root, ParsedDocument result)
         {
             if (!root.Children.TryGetValue(new YamlScalarNode("extends"), out var extendsNode))

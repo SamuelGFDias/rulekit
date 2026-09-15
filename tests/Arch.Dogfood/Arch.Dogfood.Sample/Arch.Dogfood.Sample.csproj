@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Projeto de DOGFOODING (PLANO-implementacao.md, Fase 4 trilha 4A). NÃO é um teste automatizado:
+    é um consumidor real da lib, instalada como .nupkg a partir do feed local (ver NuGet.Config ao
+    lado), exatamente como um time externo a instalaria. A diferença em relação a
+    tests/Arch.Analyzer.Tests é o ponto inteiro do exercício: os testes de unidade usam
+    ProjectReference + Microsoft.CodeAnalysis.Testing, que carrega todos os assemblies do diretório
+    de build — e por isso nunca exercitaram o que o PACOTE de fato entrega.
+
+    O código em Contoso/ é sintético mas estruturalmente realista (Controller/Service/Repository +
+    Persistence + Domain). Cada arquivo diz, no seu próprio comentário de XML doc, se é um CASO
+    LIMPO (nenhum diagnóstico esperado — qualquer um que apareça é falso positivo) ou uma VIOLAÇÃO
+    PROPOSITAL, e nesse caso quantos diagnósticos e de qual slot. Essa marcação por arquivo é a
+    fonte de verdade do esperado-vs-observado da trilha.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Library</OutputType>
+    <!-- Este projeto existe para PRODUZIR avisos; tratá-los como erro tornaria a medição impossível. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+    <!-- Mesmo gate da Fase 0: qualquer diagnóstico reportado com ID fora de SupportedDiagnostics
+         (ou qualquer exceção atravessando a fronteira do analyzer) vira AD0001. Forçá-lo a erro faz
+         a ausência de AD0001 ser verificável por exit code, não por leitura do log. -->
+    <WarningsAsErrors>AD0001</WarningsAsErrors>
+
+    <!-- Código sintético: não queremos ruído de "campo nunca usado"/"variável não usada"
+         competindo com os diagnósticos ARCHxxxx na contagem. -->
+    <NoWarn>$(NoWarn);CS0169;CS0414;CS0649;CS0219;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- .nupkg local produzido por `dotnet pack src/Arch.Analyzer -c Release -o tests/_local-nuget-feed`. -->
+    <PackageReference Include="Arch.Analyzer" Version="0.1.0" />
+  </ItemGroup>
+
+  <!--
+    Instrumentação da medição de overhead de build (Fase 4, trilha 4A).
+
+    `dotnet build -p:ArchAnalyzerEnabled=false` remove APENAS o Arch.Analyzer da lista de analyzers
+    passada ao csc, deixando os analyzers do próprio SDK ligados nas duas medições. É a comparação
+    honesta: o custo atribuído à lib é a diferença entre "SDK + Arch.Analyzer" e "SDK sozinho".
+
+    Por que não `-p:RunAnalyzersDuringBuild=false`: aquele switch desliga TODOS os analyzers, e a
+    diferença medida passaria a incluir o custo dos analyzers do SDK — superestimando a lib.
+    Por que não condicionar o PackageReference: mudaria o grafo de restore, e o tempo de restore
+    entraria na medição.
+  -->
+  <Target Name="ArchDogfoodDropAnalyzer" BeforeTargets="CoreCompile"
+          Condition="'$(ArchAnalyzerEnabled)' == 'false'">
+    <ItemGroup>
+      <Analyzer Remove="@(Analyzer)"
+                Condition="$([System.String]::Copy('%(Identity)').Contains('arch.analyzer'))" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <!-- O analyzer procura um AdditionalFile chamado exatamente "arch-rules.yaml"
+         (ArchRulesAnalyzer.ConfigFileName). O pacote ainda não traz um build/*.props que faça essa
+         inclusão automaticamente — hoje é convenção manual do consumidor (ver Riscos do relatório
+         da trilha 4A). -->
+    <AdditionalFiles Include="arch-rules.yaml" />
+  </ItemGroup>
+
+</Project>

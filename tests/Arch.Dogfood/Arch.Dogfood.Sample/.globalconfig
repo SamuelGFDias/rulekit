@@ -1,0 +1,6 @@
+is_global = true
+
+dotnet_diagnostic.ARCH0001.severity = warning
+dotnet_diagnostic.ARCH0002.severity = warning
+dotnet_diagnostic.ARCH0003.severity = warning
+dotnet_diagnostic.ARCH0004.severity = warning

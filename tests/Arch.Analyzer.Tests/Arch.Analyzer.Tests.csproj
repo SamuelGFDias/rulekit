@@ -10,9 +10,21 @@
 
   <ItemGroup>
     <!--
-      Testa o assembly REAL de Arch.Analyzer (o mesmo que é fundido/internalizado via
-      ILRepack pelo build/ilrepack.targets, já que ProjectReference dispara o Build completo
-      do projeto referenciado, AfterTargets incluído, antes de copiar a saída).
+      Testa o assembly REAL de Arch.Analyzer no formato em que ele SAI DO COMPILADOR — NÃO a
+      versão fundida/internalizada pelo ILRepack. O merge de build/ilrepack.targets roda só no
+      `dotnet pack` (Target ArchAnalyzerMergeForPack, BeforeTargets="_GetPackageFiles") e escreve
+      num caminho de intermediate output dedicado, sem tocar em $(OutDir) — por isso o
+      ProjectReference abaixo entrega o Arch.Analyzer.dll normal, com Arch.Config.dll,
+      Arch.Analyzer.Contracts.dll e Arch.Rules.dll como DLLs separadas ao lado.
+
+      Isso é correto e suficiente: internalizar via ILRepack não muda a semântica C# do código,
+      só a visibilidade entre assemblies. (Fazer o merge no build quebrava este projeto com
+      CS0433: os tipos de Arch.Config/Arch.Analyzer.Contracts ficavam visíveis DUAS vezes — pelo
+      ProjectReference transitivo e pela cópia internalizada dentro do Arch.Analyzer.dll fundido,
+      exposta pelo InternalsVisibleTo("Arch.Analyzer.Tests").)
+
+      A verificação de que o .nupkg EMPACOTADO (DLL única fundida) funciona de ponta a ponta é
+      feita por tests/Arch.Dogfood/, que consome o pacote via PackageReference.
     -->
     <ProjectReference Include="../../src/Arch.Analyzer/Arch.Analyzer.csproj" />
   </ItemGroup>
@@ -35,6 +47,20 @@
       Arch.Analyzer foi compilado (MSB3277). Pinado na mesma versão do analyzer sob teste.
     -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" />
+    <!--
+      YamlDotNet em RUNTIME para este projeto de teste. Não é uma dependência nova da lib: no
+      pacote publicado ele vai fundido e internalizado dentro do Arch.Analyzer.dll (ILRepack), e
+      aqui os testes rodam contra o assembly NÃO fundido. A referência de Arch.Analyzer o marca
+      PrivateAssets="all" (correto — ele não pode vazar como dependência do .nuspec), e isso
+      impede o fluxo transitivo do YamlDotNet.dll até a saída deste projeto.
+
+      Passou a ser necessário quando o analyzer deixou de ser capaz de rodar sem tocar o parser:
+      a resolução de `extends` chama ArchConfigParser.PeekExtends em toda compilação que tenha
+      arch-rules.yaml, inclusive nos testes que injetam a config já parseada. Sem o DLL ao lado,
+      o FileNotFoundException de carga do assembly era convertido em ARCH9001 pelo próprio
+      analyzer — falha ruidosa, mas com mensagem enganosa ("YAML inválido").
+    -->
+    <PackageReference Include="YamlDotNet" Version="13.1.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />

@@ -1,0 +1,82 @@
+# Política arquitetural do projeto de dogfooding (Fase 4, trilha 4A).
+#
+# Cobre os 4 tipos de regra do ADR-001 D2, um por slot do pool pré-declarado.
+# Cada regra tem violações PROPOSITAIS no código (ver VIOLACOES-ESPERADAS.md) e casos
+# vizinhos que devem passar limpos — é a medida de falso positivo da trilha.
+schema: arch-rules/v1
+
+layers:
+  # `**` casa zero ou mais segmentos: 'Contoso.Sales.Api.Controllers' e qualquer descendente.
+  Controller:
+    match:
+      - namespace: Contoso.Sales.Api.Controllers.**
+
+  Service:
+    match:
+      - namespace: Contoso.Sales.Application.Services.**
+
+  # Duas formas de entrar na camada, combinadas por OR (ADR-001 D2): namespace OU sufixo de nome.
+  # O sufixo é o que faz um repositório "fora do lugar" ainda ser tratado como repositório.
+  Repository:
+    match:
+      - namespace: Contoso.Sales.Infrastructure.Repositories.**
+      - nameSuffix: Repository
+
+  Persistence:
+    match:
+      - namespace: Contoso.Sales.Infrastructure.Persistence.**
+
+severities:
+  bloqueante: error
+  aviso: warning
+  dica: suggestion
+
+defaults:
+  severity: aviso
+
+rules:
+  # 1/4 — forbidden-call
+  - id: DOG-001
+    slot: ARCH0001
+    type: forbidden-call
+    from: Controller
+    to: Repository
+    severity: aviso
+    message: "{from} não pode acessar {to} diretamente ({symbol}). Injete um Service."
+    help: "https://exemplo.interno/arquitetura/DOG-001"
+
+  # 2/4 — must-route-through (açúcar sobre forbidden-call: `through` só alimenta a mensagem)
+  - id: DOG-002
+    slot: ARCH0002
+    type: must-route-through
+    from: Service
+    to: Persistence
+    through: [Repository]
+    severity: aviso
+
+  # 3/4 — naming-convention
+  - id: DOG-003
+    slot: ARCH0003
+    type: naming-convention
+    layer: Repository
+    require: { suffix: Repository }
+    severity: aviso
+
+  # 4/4 — max-dependencies (limite INCLUSIVO: exatamente 3 não viola)
+  - id: DOG-004
+    slot: ARCH0004
+    type: max-dependencies
+    layer: Service
+    max: 3
+    countBy: constructor-parameters
+    severity: aviso
+
+  # Regra desligada de propósito: `enabled: false` preserva a rastreabilidade da política sem
+  # produzir diagnóstico. Se ela disparar, é defeito.
+  - id: DOG-005
+    slot: ARCH0005
+    type: forbidden-call
+    from: Controller
+    to: Persistence
+    enabled: false
+    severity: aviso

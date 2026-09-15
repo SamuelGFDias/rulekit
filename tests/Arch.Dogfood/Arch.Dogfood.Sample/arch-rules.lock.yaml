@@ -1,0 +1,27 @@
+schema: arch-rules-lock/v1
+rules:
+  - id: DOG-001
+    slot: ARCH0001
+    type: forbidden-call
+    severity: warning
+    enabled: true
+  - id: DOG-002
+    slot: ARCH0002
+    type: must-route-through
+    severity: warning
+    enabled: true
+  - id: DOG-003
+    slot: ARCH0003
+    type: naming-convention
+    severity: warning
+    enabled: true
+  - id: DOG-004
+    slot: ARCH0004
+    type: max-dependencies
+    severity: warning
+    enabled: true
+  - id: DOG-005
+    slot: ARCH0005
+    type: forbidden-call
+    severity: warning
+    enabled: false

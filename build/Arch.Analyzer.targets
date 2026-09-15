@@ -1,0 +1,44 @@
+<!--
+  Arch.Analyzer.targets — empacotado em `build/Arch.Analyzer.targets` dentro do .nupkg.
+
+  O SDK do NuGet importa automaticamente `build/<PackageId>.targets` em QUALQUER projeto que
+  instale o pacote via PackageReference (o nome do arquivo PRECISA ser exatamente o PackageId).
+  É este arquivo que cumpre a promessa do ADR-001 §5, "Empacotamento": instalar o pacote e criar
+  o `arch-rules.yaml` basta — sem edição manual de .csproj.
+
+  POR QUE .targets E NÃO .props (ADR-001 §5): um .props é importado ANTES do corpo do projeto e,
+  nesse ponto, caminhos relativos e globs podem ser avaliados cedo demais (antes de o SDK ter
+  normalizado diretórios). O .targets é importado depois do corpo do projeto, quando
+  $(MSBuildProjectDirectory) já está estabelecido — e a inclusão do arquivo principal ainda leva
+  Condition="Exists(...)" explícita, para não injetar em @(AdditionalFiles) um caminho que não
+  existe (o compilador falharia ao tentar abrir o arquivo).
+
+  SEPARADOR DE CAMINHO: barra normal (/), não contrabarra. O MSBuild aceita '/' nos dois sistemas
+  operacionais (no Windows o Win32 também aceita), enquanto '\' depende da normalização do MSBuild
+  em Linux/macOS. Verificado com `dotnet build` real em Linux (tests/Arch.Dogfood).
+-->
+<Project>
+
+  <ItemGroup>
+    <!-- O arquivo de política principal, por convenção ao lado do .csproj. O analyzer procura um
+         AdditionalFile com este nome exato (ArchRulesAnalyzer.ConfigFileName). -->
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)/arch-rules.yaml"
+                     Condition="Exists('$(MSBuildProjectDirectory)/arch-rules.yaml')" />
+
+    <!-- Arquivos de `extends` seguindo a convenção de nome documentada no README
+         (arch-rules.base.yaml, arch-rules.<qualquer-coisa>.yaml) também precisam estar em
+         @(AdditionalFiles): o analyzer roda dentro do compilador e NÃO PODE fazer I/O de disco
+         (RS1035) — ele só enxerga o que o MSBuild passou em AdditionalFiles. Um arquivo de
+         `extends` com nome fora dessa convenção (ou em outro diretório) continua precisando de um
+         <AdditionalFiles Include="..." /> manual no .csproj do consumidor; sem isso o analyzer
+         reporta ARCH9006 (warning, não bloqueante) dizendo exatamente qual caminho faltou.
+
+         Sem Condition: um glob que não casa nada simplesmente não gera item. O Exclude tira do
+         glob o arquivo principal (que já entrou acima) e o `arch-rules.lock.yaml` — artefato de
+         saída do `arch-rules gen`, nunca uma camada de `extends`; passá-lo ao compilador só
+         adicionaria ruído. -->
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)/arch-rules.*.yaml"
+                     Exclude="$(MSBuildProjectDirectory)/arch-rules.yaml;$(MSBuildProjectDirectory)/arch-rules.lock.yaml" />
+  </ItemGroup>
+
+</Project>

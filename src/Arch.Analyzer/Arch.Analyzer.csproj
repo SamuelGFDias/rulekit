@@ -7,9 +7,9 @@
     <EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
 
     <!-- Empacotamento de analyzer (ADR-001 §5, "Empacotamento") -->
-    <PackageId>Arch.Analyzer.Spike</PackageId>
-    <Version>0.1.0-spike</Version>
-    <Description>Spike de viabilidade da Fase 0 (ADR-001) — NÃO é a lib final.</Description>
+    <PackageId>Arch.Analyzer</PackageId>
+    <Version>0.1.0</Version>
+    <Description>Motor de regras arquiteturais configurável via YAML — Roslyn Analyzer (ADR-001).</Description>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <DevelopmentDependency>true</DevelopmentDependency>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
@@ -20,8 +20,11 @@
 
     <!-- Um netstandard2.0 "class library" comum NÃO copia DLLs de PackageReference para o
          bin de saída por padrão (CopyLocalLockFileAssemblies=false é o default do SDK para
-         esse TFM) — só gera o .deps.json. build/ilrepack.targets precisa do YamlDotNet.dll
-         fisicamente em $(OutDir) para fundir com ILRepack, então isso é forçado aqui. -->
+         esse TFM) — só gera o .deps.json. build/ilrepack.targets continua necessitando do
+         YamlDotNet.dll fisicamente em $(OutDir) para fundir com ILRepack, então isso segue
+         forçado aqui. (Ainda necessário depois de o merge ter migrado de AfterTargets="Build"
+         para BeforeTargets="_GetPackageFiles": o Pack roda o Build antes e continua LENDO de
+         $(OutDir) — só não escreve mais lá.) -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
 
     <!-- Aponta o ILRepack.Lib.MSBuild.Task para o alvo custom do repositório em vez do seu
@@ -39,7 +42,8 @@
          garantem que ele não vaza como dependência no .nuspec do pacote. -->
     <PackageReference Include="YamlDotNet" Version="13.1.0" PrivateAssets="all" />
 
-    <!-- Executa o merge/internalize no post-build (ver ILRepackTargetsFile acima). -->
+    <!-- Executa o merge/internalize durante o Pack, não no build (ver ILRepackTargetsFile acima
+         e o bloco "POR QUE ESTE TARGET RODA SÓ NO PACK" em build/ilrepack.targets). -->
     <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.46" PrivateAssets="all" />
   </ItemGroup>
 
@@ -58,9 +62,25 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Único DLL entregue em analyzers/dotnet/cs — já é o resultado pós-ILRepack quando o
-         `dotnet pack` roda depois do `dotnet build` (o merge é AfterTargets="Build"). -->
-    <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <!-- build/<PackageId>.targets (ADR-001 §5, "Empacotamento"): o SDK do NuGet importa este
+         arquivo automaticamente em todo projeto que instale o pacote, e é ele que adiciona o
+         `arch-rules.yaml` do consumidor aos @(AdditionalFiles). Sem isso, instalar o pacote e
+         criar o YAML não produz diagnóstico NENHUM — o analyzer sai pela saída rápida de
+         OnCompilationStart por não achar o AdditionalFile, silenciosamente.
+
+         Item ESTÁTICO (diferente do <None> da DLL fundida, que é injetado em tempo de Pack por
+         build/ilrepack.targets): este arquivo existe fisicamente no repositório e não depende de
+         nenhum passo de build. O PackagePath precisa ser exatamente build/Arch.Analyzer.targets —
+         o NuGet só importa build/<PackageId>.(props|targets). -->
+    <None Include="$(MSBuildThisFileDirectory)../../build/Arch.Analyzer.targets"
+          Pack="true" PackagePath="build/Arch.Analyzer.targets" Visible="false" />
   </ItemGroup>
+
+  <!-- NÃO declarar aqui um <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" .../>.
+       Esse item estático existia e empacotava o assembly NÃO fundido de $(OutDir) — correto só
+       enquanto o merge sobrescrevia $(OutDir) no post-build, o que quebrava os projetos de teste
+       com CS0433. O único item que entrega a DLL em analyzers/dotnet/cs agora é o <None> dinâmico
+       injetado pelo Target ArchAnalyzerMergeForPack em build/ilrepack.targets, apontando para o
+       resultado fundido no intermediate output. -->
 
 </Project>

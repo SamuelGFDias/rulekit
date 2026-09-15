@@ -21,13 +21,40 @@
       benchmark — mesmo padrão de tests/Arch.Analyzer.Tests e tests/Arch.TestHarness.
     -->
     <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="4.8.0" />
+
+    <!--
+      Mesmo problema do Common acima, mas para o assembly Microsoft.CodeAnalysis.CSharp
+      especificamente: sem este pin explícito, o processo HOST (o próprio `dotnet run` deste
+      projeto, não o satélite que o BenchmarkDotNet builda por benchmark) carrega a v4.1.0
+      transitiva de BenchmarkDotNet ao escanear os tipos de benchmark via reflexão — e
+      Arch.Benchmarks usa CSharpCompilation/CSharpSyntaxTree diretamente (trilha 4C,
+      perf-audit) para montar os projetos sintéticos em memória, o que expõe a incompatibilidade
+      binária entre 4.1.0 e 4.8.0 (TypeLoadException em CSharpCompilation.GetSymbolInternal)
+      assim que o host tenta carregar Arch.Benchmarks.dll.
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+
+    <!--
+      src/Arch.Config/Arch.Config.csproj (netstandard2.0, sem PrivateAssets/CopyLocalLockFileAssemblies)
+      referencia YamlDotNet diretamente para o parser real (ArchConfigParser). Em produção isso nunca
+      precisa de um YamlDotNet.dll solto: build/ilrepack.targets funde e internaliza Arch.Config.dll +
+      YamlDotNet.dll dentro do Arch.Analyzer.dll final (ver saída de build, "Merging 5 assemblies").
+      Aqui, porém, Arch.Benchmarks referencia Arch.Config.dll diretamente e SEM PASSAR pelo merge
+      (trilha 4C chama ArchConfigParser.Parse fora do pipeline do analyzer, para montar a ArchConfig
+      da LayerResolverMemoizationBenchmarks) — a cópia solta de Arch.Config.dll que chega ao nosso
+      bin/ (netstandard2.0 não copia PackageReferences por padrão) espera um YamlDotNet.dll real ao
+      lado dela em runtime. Pin explícito na MESMA versão do analyzer só para satisfazer esse load;
+      nunca vira dependência do pacote publicado (isso é problema de Arch.Analyzer, não deste
+      projeto de teste).
+    -->
+    <PackageReference Include="YamlDotNet" Version="13.1.0" />
   </ItemGroup>
 
   <ItemGroup>
     <!--
-      Referencia o analyzer real para o placeholder abaixo (instanciar ArchRulesAnalyzer).
-      Este projeto só CONSOME src/Arch.Analyzer (ProjectReference), nunca edita nada sob
-      src/** — ver fronteira da trilha 1C (infra-tests) no PLANO-implementacao.md.
+      Referencia o analyzer real (ArchRulesAnalyzer, LayerResolver via reflexão, RuleEvaluatorRegistry
+      real). Este projeto só CONSOME src/Arch.Analyzer (ProjectReference), nunca edita nada sob
+      src/** — ver fronteira da trilha 1C (infra-tests) e 4C (perf-audit) no PLANO-implementacao.md.
     -->
     <ProjectReference Include="../../src/Arch.Analyzer/Arch.Analyzer.csproj" />
   </ItemGroup>

@@ -76,6 +76,18 @@ namespace Arch.Analyzer
         internal static readonly DiagnosticDescriptor Arch9005;
 
         /// <summary>
+        /// ARCH9006 — um caminho declarado em `extends:` não tem AdditionalFile correspondente.
+        /// Aquela camada da política é ignorada; o resto da cadeia continua valendo.
+        /// </summary>
+        internal static readonly DiagnosticDescriptor Arch9006;
+
+        /// <summary>
+        /// ARCH9007 — topologia inválida da cadeia de `extends` (ciclo, ou profundidade acima do
+        /// limite). O ramo problemático é cortado; o resto da cadeia continua valendo.
+        /// </summary>
+        internal static readonly DiagnosticDescriptor Arch9007;
+
+        /// <summary>
         /// Tudo que o analyzer pode reportar: os 512 slots + a faixa ARCH9xxx. É exatamente o que
         /// <see cref="Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer.SupportedDiagnostics"/>
         /// devolve — imutável e computada uma única vez.
@@ -155,6 +167,32 @@ namespace Arch.Analyzer
                     ".editorconfig/.globalconfig — sinal de que `arch-rules gen` não foi reexecutado (ADR-001 D3). " +
                     "Reservado: reportado a partir da Fase 3.");
 
+            // ARCH9006/ARCH9007 são reportados SÓ pelo analyzer (nunca pelo parser de Arch.Config):
+            // eles descrevem a resolução da cadeia de `extends` contra @(AdditionalFiles), que é
+            // integração, não schema. Códigos separados de propósito — "faltou o arquivo" e "a
+            // cadeia se morde" têm causas e correções diferentes, e um time pode querer silenciar um
+            // sem perder o outro (`dotnet_diagnostic.ARCH9006.severity = none`).
+            Arch9006 = CreateEngineDescriptor(
+                id: "ARCH9006",
+                title: "Arquivo de 'extends' não está em AdditionalFiles",
+                defaultSeverity: DiagnosticSeverity.Warning,
+                description:
+                    "Um caminho declarado em `extends:` não tem AdditionalFile correspondente nesta compilação. O " +
+                    "analyzer roda dentro do compilador e não pode ler do disco (RS1035): ele só enxerga o que o " +
+                    "MSBuild passou em @(AdditionalFiles). O pacote inclui automaticamente `arch-rules.yaml` e " +
+                    "`arch-rules.*.yaml` do diretório do projeto; qualquer outro nome ou diretório exige " +
+                    "<AdditionalFiles Include=\"...\" /> manual no .csproj. NÃO é bloqueante: a camada ausente é " +
+                    "ignorada e as regras do restante da cadeia continuam sendo avaliadas.");
+
+            Arch9007 = CreateEngineDescriptor(
+                id: "ARCH9007",
+                title: "Cadeia de 'extends' inválida (ciclo ou profundidade excessiva)",
+                defaultSeverity: DiagnosticSeverity.Warning,
+                description:
+                    "A cadeia de `extends` volta a um arquivo que já está sendo resolvido (ciclo) ou excede o limite " +
+                    "de profundidade do resolvedor. O ramo problemático é cortado — sem isso a resolução seria " +
+                    "infinita — e as demais camadas continuam valendo. Não é bloqueante.");
+
             EngineById = ImmutableDictionary.CreateRange(
                 StringComparer.OrdinalIgnoreCase,
                 new[]
@@ -164,11 +202,20 @@ namespace Arch.Analyzer
                     new KeyValuePair<string, DiagnosticDescriptor>(Arch9003.Id, Arch9003),
                     new KeyValuePair<string, DiagnosticDescriptor>(Arch9004.Id, Arch9004),
                     new KeyValuePair<string, DiagnosticDescriptor>(Arch9005.Id, Arch9005),
+                    new KeyValuePair<string, DiagnosticDescriptor>(Arch9006.Id, Arch9006),
+                    new KeyValuePair<string, DiagnosticDescriptor>(Arch9007.Id, Arch9007),
                 });
 
             // Ordem explícita (não a de EngineById, que é um dicionário) para que SupportedDiagnostics
             // seja estável entre execuções — ferramentas de documentação e testes comparam essa lista.
-            All = Slots.Add(Arch9001).Add(Arch9002).Add(Arch9003).Add(Arch9004).Add(Arch9005);
+            All = Slots
+                .Add(Arch9001)
+                .Add(Arch9002)
+                .Add(Arch9003)
+                .Add(Arch9004)
+                .Add(Arch9005)
+                .Add(Arch9006)
+                .Add(Arch9007);
         }
 
         private static DiagnosticDescriptor CreateEngineDescriptor(

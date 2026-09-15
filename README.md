@@ -55,6 +55,35 @@ O pacote ainda não está publicado num feed NuGet público. Enquanto isso, o co
    Quando um release público existir, esta seção será atualizada com o comando `dotnet add package`
    real contra o feed publicado — não use um comando de exemplo daqui como se já existisse hoje.
 
+### Nada de editar o `.csproj` à mão
+
+O pacote traz um `build/Arch.Analyzer.targets`, importado automaticamente pelo NuGet em qualquer
+projeto que o instale via `PackageReference`. Ele adiciona aos `AdditionalFiles` do compilador:
+
+- **`arch-rules.yaml` do diretório do projeto** — instalar o pacote e criar esse arquivo basta para
+  ver diagnósticos;
+- **`arch-rules.*.yaml` do mesmo diretório** (ex.: `arch-rules.base.yaml`), para que os arquivos
+  citados em `extends:` também cheguem ao analyzer.
+
+Essa convenção de nome existe porque um analyzer roda dentro do compilador e **não pode ler do
+disco**: ele só enxerga o que o MSBuild passou em `AdditionalFiles`. Um arquivo de `extends` com
+outro nome, ou em outro diretório, continua precisando de uma linha explícita no `.csproj`:
+
+```xml
+<ItemGroup>
+  <AdditionalFiles Include="..\shared\politica-corporativa.yaml" />
+</ItemGroup>
+```
+
+Sem essa linha o build não fica silencioso: o analyzer reporta **`ARCH9006`** (warning) dizendo qual
+caminho faltou. Não é bloqueante — as regras que não dependiam do arquivo ausente continuam valendo.
+
+O CLI é diferente por natureza: `arch-rules gen` e `arch-rules validate` são processos comuns e leem
+o disco livremente, então resolvem a cadeia de `extends` **inteira**, com qualquer nome de arquivo e
+em qualquer diretório. Um `extends` que funciona no `validate` do CI mas não segue a convenção acima
+é exatamente o caso em que o `ARCH9006` aparece no build — o CLI não é prova de que o analyzer
+enxergou o arquivo.
+
 ## Tutorial: política de 3 camadas do zero
 
 Este tutorial cobre o gate de saída da Fase 3: sair do zero e chegar a um diagnóstico visível na
