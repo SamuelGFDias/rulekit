@@ -52,10 +52,10 @@ granularidade de override por regra). Uma MSBuild task que aloca slots automatic
 
 Detalhes completos, exemplos de YAML e trade-offs: `ADR-001-motor-regras-arquiteturais.md`.
 
-## 4. Estrutura de pastas (real, pós-Fase 2)
+## 4. Estrutura de pastas (real, pós-Fase 3)
 
-A árvore abaixo reflete o `RuleKit.sln` de fato após a Fase 0 (spike), a Fase 1 (fundações) e a
-Fase 2 (tipos de regra). `src/Arch.Cli/` **ainda não existe** — é a Fase 3.
+A árvore abaixo reflete o `RuleKit.sln` de fato após a Fase 0 (spike), a Fase 1 (fundações), a
+Fase 2 (tipos de regra) e a Fase 3 (ergonomia — CLI e documentação).
 
 ```
 src/
@@ -79,11 +79,22 @@ src/
                                   # do anterior — açúcar sintático), NamingConventionEvaluator.cs,
                                   # MaxDependenciesEvaluator.cs. Referencia só
                                   # Arch.Analyzer.Contracts + Arch.Config, NÃO Arch.Analyzer.
-  Arch.Cli/                      # AINDA NÃO EXISTE — Fase 3, gerador de .globalconfig/lock file
+  Arch.Cli/                      # REAL — Fase 3, net10.0, OutputType=Exe, PackAsTool=true,
+                                  # ToolCommandName=arch-rules. Comandos: `arch-rules gen <yaml>
+                                  # [--out <dir>]` (resolve extends do disco, valida schema e slots
+                                  # únicos dentro do pool ARCH0001-0512, gera .globalconfig com
+                                  # dotnet_diagnostic.<slot>.severity = <valor> e
+                                  # arch-rules.lock.yaml com o retrato id→slot→severidade→enabled) e
+                                  # `arch-rules validate <yaml>` (mesma validação, sem gerar
+                                  # arquivo, para uso em CI). Arquivos: Program.cs,
+                                  # ConfigPipeline.cs, GenCommand.cs, ValidateCommand.cs,
+                                  # ExtendsResolver.cs, SlotValidator.cs, SeverityResolver.cs,
+                                  # GlobalConfigWriter.cs, LockFileWriter.cs, CliDiagnostic.cs.
 tests/
   Arch.Config.Tests/             # parser puro, sem Roslyn — 9 testes
   Arch.Analyzer.Tests/           # harness (código + config) -> diagnósticos — 53 testes
   Arch.Rules.Tests/              # REAL — Fase 2, testes dos 4 avaliadores — 30 testes
+  Arch.Cli.Tests/                # REAL — Fase 3, testes do CLI (gen/validate) — 8 testes
   Arch.TestHarness/              # harness reutilizável de compilação in-memory — 2 testes próprios,
                                   # consumido também por Arch.Analyzer.Tests
   Arch.Benchmarks/                # esqueleto de regressão de performance (ainda sem benchmarks reais)
@@ -100,7 +111,9 @@ build/
                                   # pipeline — ver issue #1 no GitHub
 docs/
   adr/ADR-001-....md
-  schema/arch-rules.v1.json      # JSON Schema publicado (ainda não existe — Fase 3)
+  schema/arch-rules.v1.json      # REAL — Fase 3, JSON Schema completo (draft 2020-12) do
+                                  # arch-rules.yaml v1, validado contra o exemplo do ADR-001 D2 e
+                                  # contra os 4 tipos de regra reais
 ```
 
 `Arch.Config` e `Arch.Rules` são fundidos em `Arch.Analyzer.dll` no pack — a separação existe para
@@ -130,23 +143,26 @@ testabilidade e paralelização entre trilhas, não para distribuição.
 - **Fase 0 (spike de viabilidade Roslyn) concluída** — commit `fe902e6`. Provou o pool de slots na
   prática (sem `AD0001`) e congelou os contratos (`ILayerResolver`, `IRuleEvaluator`).
 - **Fase 1 (fundações: config-parser, analyzer-core, infra-tests) concluída** — commit `73e9bf4`.
-- **Fase 2 (tipos de regra) concluída** — gate completo fechado com **94 testes aprovados** no total
-  (`Arch.Config.Tests` 9 + `Arch.Analyzer.Tests` 53 + `Arch.Rules.Tests` 30 + `Arch.TestHarness` 2),
-  0 falhas. `RuleEvaluatorRegistry.Default` (`src/Arch.Analyzer/RuleEvaluatorRegistry.cs`) está
-  populado com os 4 tipos de regra do ADR-001: `forbidden-call`, `must-route-through`,
-  `naming-convention`, `max-dependencies`. A única falha de build conhecida e esperada continua
-  sendo `tests/Arch.Spike.Consumer` (artefato do spike da Fase 0, não faz parte da lib final).
+- **Fase 2 (tipos de regra) concluída** — `RuleEvaluatorRegistry.Default`
+  (`src/Arch.Analyzer/RuleEvaluatorRegistry.cs`) está populado com os 4 tipos de regra do ADR-001:
+  `forbidden-call`, `must-route-through`, `naming-convention`, `max-dependencies`.
+- **Fase 3 (ergonomia — CLI e documentação) concluída** — gate completo fechado com **102 testes
+  aprovados** no total (`Arch.Config.Tests` 9 + `Arch.Cli.Tests` 8 + `Arch.TestHarness` 2 +
+  `Arch.Analyzer.Tests` 53 + `Arch.Rules.Tests` 30), 0 falhas. CLI `arch-rules gen`/`validate`
+  funcional — testado manualmente pelo arquiteto de ponta a ponta contra um YAML real. A única falha
+  de build conhecida e esperada continua sendo `tests/Arch.Spike.Consumer` (artefato do spike da
+  Fase 0, não faz parte da lib final).
 - **Pendência conhecida:** validação em host .NET Framework/Visual Studio, ainda fora do pipeline de
   CI — rastreada na issue https://github.com/SamuelGFDias/rulekit/issues/1.
-- **Próxima fase:** Fase 3 (ergonomia — `Arch.Cli` para gerar `.globalconfig`/lock file, e
-  documentação/JSON Schema).
+- **Próxima fase:** Fase 4 (verificação — dogfooding, revisão adversarial, auditoria de
+  performance).
 
 Fases seguintes do plano (cada uma só começa com o gate da anterior fechado):
 
 - **Fase 2 — Tipos de regra (CONCLUÍDA):** 4 trilhas paralelas implementando `IRuleEvaluator` (
   `forbidden-call`, `must-route-through` como açúcar sobre a anterior, `naming-convention`,
   `max-dependencies`), isoladas por arquivo em `src/Arch.Rules/`.
-- **Fase 3 — Ergonomia:** 2 trilhas paralelas — CLI gerador de `.globalconfig`/lock file
+- **Fase 3 — Ergonomia (CONCLUÍDA):** 2 trilhas paralelas — CLI gerador de `.globalconfig`/lock file
   (`Arch.Cli`) e documentação/JSON Schema publicado.
 - **Fase 4 — Verificação adversarial:** 3 trilhas paralelas — dogfooding em repositório real,
   revisão adversarial obrigatória por agente sem investimento no código escrito, e auditoria de
@@ -192,6 +208,11 @@ fixa contratos compartilhados (interfaces, trechos do ADR) no prompt de cada del
   `Column`/`IsBlocking`). Um erro `IsBlocking = true` (ex.: `ARCH9001`) zera `Config` no resultado e
   interrompe o registro de regras; um erro não bloqueante (ex.: `ARCH9003`, tipo de regra
   desconhecido) deixa `Config` utilizável e não impede as demais regras de valerem.
+- **`ArchConfigParser.Parse(IReadOnlyList<string>)` agora é API pública (desde a Fase 3).** Esse
+  overload (resolução de `extends`) era `internal`, visível só para os testes. Com `Arch.Cli`
+  consumindo-o diretamente em produção (`ConfigPipeline.cs`/`ExtendsResolver.cs`), ele foi promovido
+  a `public`. Qualquer mudança de assinatura futura quebra um consumidor de produção real, não só um
+  teste — tratar como contrato estável.
 - **Faixa ARCH9xxx hoje:** `ARCH9001` (config inválida/schema, `Error`, invalida o arquivo inteiro),
   `ARCH9002` (slot fora do pool de 512 ou duplicado entre regras, `Warning`, regra ignorada),
   `ARCH9003` (tipo de regra desconhecido, `Warning`, regra ignorada — desde a Fase 2 só ocorre para

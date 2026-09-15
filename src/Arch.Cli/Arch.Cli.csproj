@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Arch.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Fase 3 / PLANO-implementacao.md: "net10.0 — gerador de .globalconfig e lock file",
+         distribuído como dotnet tool (ADR-001 §9 Action Item #5: "gerador CLI é dotnet tool
+         global ou local ao repositório" — decidido aqui como dotnet tool, instalável tanto
+         global quanto local ao repo via manifesto, sem exigir que o consumidor clone a lib). -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>arch-rules</ToolCommandName>
+    <PackageId>Arch.Cli</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Precisa de Arch.Config.ArchConfigParser (overload público que resolve `extends` já
+         resolvido pelo chamador — a resolução de I/O em si é feita aqui no CLI, ver
+         ExtendsResolver.cs). -->
+    <ProjectReference Include="../Arch.Config/Arch.Config.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Mesma versão usada por Arch.Config (src/Arch.Config/Arch.Config.csproj), só para extrair
+         a chave `extends:` de cada arquivo YAML no disco antes de chamar o parser público (ver
+         ExtendsResolver.cs) — não há aqui a restrição de "nunca DLL separada" do ADR-001 D1, que
+         é específica do analyzer hospedado dentro do compilador (roslyn#41421); o CLI é um
+         executável .NET comum. -->
+    <PackageReference Include="YamlDotNet" Version="13.1.0" />
+  </ItemGroup>
+
+  <!--
+    Parsing de argumentos: implementado à mão (ver Program.cs) em vez de referenciar
+    System.CommandLine. Motivo (decisão desta trilha, documentada por exigência do prompt): a
+    superfície de comandos é mínima e estável, dois subcomandos ('gen'/'validate'), cada um com um
+    argumento posicional e no máximo uma opção (a flag 'out'), sem subcomandos aninhados, nem
+    negociação de tipos complexos, nem necessidade de geração de texto de ajuda sofisticado.
+    Adicionar uma dependência externa (ainda em pré lançamento estável no ecossistema .NET, com
+    breaking changes entre betas) para esse escopo trocaria poucas dezenas de linhas de código
+    óbvio e testável por uma superfície de API externa a rastrear, sem ganho real de robustez para
+    o caso de uso. Caso o CLI cresça (mais subcomandos, autocompletar de shell, ajuda rica),
+    revisitar.
+  -->
+
+</Project>

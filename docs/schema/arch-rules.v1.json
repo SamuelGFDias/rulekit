@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/SamuelGFDias/rulekit/docs/schema/arch-rules.v1.json",
+  "title": "arch-rules.yaml (schema arch-rules/v1)",
+  "description": "Schema do arquivo de política arquitetural consumido pelo RuleKit (ADR-001, secao 4 D2). Cobre a sintaxe completa da versao MAJOR v1. Referencia cruzada NAO validada por este schema: 'defaults.severity' e 'rules[].severity' deveriam apontar para uma chave existente em 'severities', mas JSON Schema nao expressa 'esta string deve ser uma das chaves de outro objeto' — a validacao real dessa referencia acontece em runtime, no parser (Arch.Config), que reporta ARCH9001/ARCH9002 conforme o caso.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "layers", "rules"],
+  "properties": {
+    "schema": {
+      "const": "arch-rules/v1",
+      "description": "Versao do schema (ADR-001 D4). Obrigatoria. MAJOR incompativel gera ARCH9001 (error, arquivo inteiro invalidado); dentro da mesma MAJOR, MINOR e aditivo (campo ou 'type' de regra desconhecido gera ARCH9003, warning, e nao invalida as demais regras)."
+    },
+    "extends": {
+      "type": "array",
+      "description": "Caminhos (relativos ao arquivo atual) de arquivos arch-rules.yaml a compor por merge. O arquivo que faz 'extends' vence no merge; 'layers' e 'rules' fazem merge por nome/id (ADR-001 D2).",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "layers": {
+      "type": "object",
+      "description": "Mapa nome-da-camada -> definicao. O nome da camada e livre (chave escolhida pelo consumidor, ex.: 'Controller', 'Service', 'Repository') e e referenciado por 'from'/'to'/'through'/'layer' em 'rules'.",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/layerDefinition" }
+    },
+    "severities": {
+      "type": "object",
+      "description": "Mapa nome-livre-de-severidade -> nivel real do AnalyzerConfig (ADR-001 D3). As chaves sao escolhidas pelo consumidor (ex.: 'restrita', 'media', 'livre'); os valores sao restritos aos 5 niveis que 'dotnet_diagnostic.<ID>.severity' aceita. 'info' e 'hidden' (do enum DiagnosticSeverity) NUNCA sao valores validos aqui — o mapeamento canonico e suggestion=Info, silent=Hidden.",
+      "additionalProperties": { "$ref": "#/$defs/severityLevel" }
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Valores padrao aplicados a regras que nao os declaram explicitamente.",
+      "additionalProperties": false,
+      "properties": {
+        "severity": {
+          "type": "string",
+          "description": "Deveria ser uma chave existente em 'severities' — referencia cruzada NAO validada por este JSON Schema (ver descricao do documento raiz); validada em runtime pelo parser."
+        }
+      }
+    },
+    "rules": {
+      "type": "array",
+      "description": "Lista de regras arquiteturais. Cada regra mapeia um id de negocio a um slot tecnico pre-declarado (ADR-001 secao 2/3, pool de 512 descriptors ARCH0001..ARCH0512).",
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "matchCriterion": {
+      "type": "object",
+      "description": "Um criterio de match/exclude de camada. Deve ter EXATAMENTE UMA das chaves namespace/nameSuffix/baseType/implements/attribute (ADR-001 D2). Multiplos criterios na mesma lista sao combinados por OR.",
+      "additionalProperties": false,
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "Padrao de namespace, aceita '*' (um segmento) e '**' (qualquer profundidade), ex.: 'Acme.Api.Controllers.**'."
+        },
+        "nameSuffix": {
+          "type": "string",
+          "description": "Sufixo do nome do tipo, ex.: 'Controller'."
+        },
+        "baseType": {
+          "type": "string",
+          "description": "Nome totalmente qualificado do tipo base, resolvido via GetTypeByMetadataName. Nao resolvido gera ARCH9004 (warning) e o criterio e ignorado."
+        },
+        "implements": {
+          "type": "string",
+          "description": "Nome totalmente qualificado da interface implementada, resolvido via GetTypeByMetadataName. Nao resolvido gera ARCH9004 (warning) e o criterio e ignorado."
+        },
+        "attribute": {
+          "type": "string",
+          "description": "Nome totalmente qualificado do atributo aplicado ao tipo, resolvido via GetTypeByMetadataName. Nao resolvido gera ARCH9004 (warning) e o criterio e ignorado."
+        }
+      },
+      "oneOf": [
+        { "required": ["namespace"] },
+        { "required": ["nameSuffix"] },
+        { "required": ["baseType"] },
+        { "required": ["implements"] },
+        { "required": ["attribute"] }
+      ]
+    },
+    "layerDefinition": {
+      "type": "object",
+      "description": "Definicao de uma camada: um ou mais criterios de inclusao (match, combinados por OR) e, opcionalmente, criterios de exclusao (exclude, tambem combinados por OR, aplicados depois do match).",
+      "additionalProperties": false,
+      "required": ["match"],
+      "properties": {
+        "match": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/matchCriterion" }
+        },
+        "exclude": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/matchCriterion" }
+        }
+      }
+    },
+    "severityLevel": {
+      "type": "string",
+      "description": "Nivel aceito por 'dotnet_diagnostic.<ID>.severity' no AnalyzerConfig gerado (ADR-001 D3). 'suggestion' mapeia para DiagnosticSeverity.Info e 'silent' para DiagnosticSeverity.Hidden; 'none' suprime o diagnostico. Os literais 'info'/'hidden' do enum DiagnosticSeverity nunca sao usados aqui de proposito.",
+      "enum": ["error", "warning", "suggestion", "silent", "none"]
+    },
+    "ruleTypeKnown": {
+      "type": "string",
+      "enum": ["forbidden-call", "must-route-through", "naming-convention", "max-dependencies"],
+      "description": "Os 4 tipos de regra implementados por Arch.Rules na Fase 2 (RuleEvaluatorRegistry.Default)."
+    },
+    "rule": {
+      "type": "object",
+      "description": "Uma regra arquitetural. O par id/slot e a chave de todo o mecanismo de diagnostico (ADR-001 secao 2/3): 'id' e a identidade de negocio (aparece na mensagem e em Diagnostic.Properties), 'slot' e a identidade tecnica pre-declarada que o compilador, o .editorconfig/.globalconfig e '#pragma' realmente enxergam.",
+      "required": ["id", "slot", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identidade de negocio da regra, livre (ex.: 'ACME-001'). Nao precisa ser um identificador de diagnostico Roslyn valido — pode conter hifen."
+        },
+        "slot": {
+          "type": "string",
+          "pattern": "^ARCH0[0-4][0-9]{2}$|^ARCH050[0-9]$|^ARCH051[0-2]$",
+          "description": "Descriptor tecnico pre-declarado ao qual esta regra e mapeada, no intervalo ARCH0001..ARCH0512 (pool de slots, ADR-001 secao 2/3 Opcao C). Fora do intervalo ou duplicado entre regras gera ARCH9002 (warning, regra ignorada). A faixa ARCH9xxx e reservada ao motor e nunca deve ser usada aqui."
+        },
+        "type": {
+          "description": "Tipo de regra, roteado para um IRuleEvaluator via RuleEvaluatorRegistry (AGENTS.md secao 8). Este schema NAO restringe 'type' a um enum fechado: e proposital deixar qualquer string passar aqui, porque D4 do ADR trata novos 'type' como extensao MINOR aditiva — um tipo desconhecido para a versao instalada da lib gera apenas ARCH9003 (warning, regra ignorada, as demais continuam valendo), nunca um erro de schema bloqueante. Travar o autocomplete a um enum fechado neste arquivo quebraria esse contrato de compatibilidade a cada novo tipo lancado. Os 4 tipos abaixo sao os unicos implementados hoje (Fase 2); os campos 'Extra' especificos de cada um so sao exigidos quando 'type' bate com um destes.",
+          "type": "string",
+          "minLength": 1
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Permite desligar a regra sem apaga-la (preserva rastreabilidade em merges de 'extends', ADR-001 D2)."
+        },
+        "severity": {
+          "type": "string",
+          "description": "Deveria ser uma chave existente em 'severities' (ou usar 'defaults.severity' quando omitido) — referencia cruzada NAO validada por este JSON Schema; validada em runtime pelo parser."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Template de mensagem com placeholders expandidos a partir de 'Extra' (ex.: '{from}', '{to}', '{symbol}', e para must-route-through tambem '{through}'). Quando omitido, cada avaliador usa seu DefaultMessageTemplate."
+        },
+        "help": {
+          "type": "string",
+          "minLength": 1,
+          "description": "URL (ou referencia) de ajuda para a regra, exposta em Diagnostic.Properties['archHelp']."
+        },
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nome de uma camada declarada em 'layers'. Usado por forbidden-call e must-route-through: nenhum tipo desta camada pode alcancar (invocacao, criacao de objeto, leitura de propriedade ou campo) diretamente um tipo da camada 'to'."
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nome de uma camada declarada em 'layers'. Ver 'from'."
+        },
+        "through": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Usado por must-route-through: lista de camadas intermediarias esperadas, apenas para compor a mensagem (ex.: '{through}') — nao e verificado o caminho real A->B->C (ADR-001 D2, 'Nota sobre must-route-through'); a deteccao efetiva e identica a forbidden-call sobre 'from'/'to'."
+        },
+        "layer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nome de uma camada declarada em 'layers'. Usado por naming-convention (camada cujos tipos devem obedecer a convencao de nome) e max-dependencies (camada cujos tipos tem o limite de dependencias verificado)."
+        },
+        "require": {
+          "type": "object",
+          "description": "Usado por naming-convention: convencao de nome exigida para tipos da camada 'layer'. Documentado no ADR e no XML doc de NamingConventionEvaluator apenas com 'suffix'; o avaliador tambem aceita 'prefix' com o mesmo formato (suporte antecipado, nao exigido pelo ADR nesta fase). Exatamente uma chave.",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1,
+          "properties": {
+            "suffix": { "type": "string", "minLength": 1, "description": "Sufixo obrigatorio do nome do tipo, ex.: 'Repository'." },
+            "prefix": { "type": "string", "minLength": 1, "description": "Prefixo obrigatorio do nome do tipo, ex.: 'I'. Suporte antecipado do avaliador, nao documentado no ADR." }
+          }
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Usado por max-dependencies: numero maximo de dependencias distintas permitido (limite inclusivo — contagem igual a 'max' nao reporta)."
+        },
+        "countBy": {
+          "type": "string",
+          "enum": ["constructor-parameters", "fields", "all"],
+          "description": "Usado por max-dependencies: como contar dependencias — pelo maior construtor publico ('constructor-parameters'), por campos de instancia privados/protegidos declarados diretamente no tipo e nao primitivos ('fields'), ou pela uniao dos tipos distintos das duas contagens ('all'). Contagem e por TIPO distinto, nao por ocorrencia."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "forbidden-call" } }, "required": ["type"] },
+          "then": { "required": ["from", "to"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "must-route-through" } }, "required": ["type"] },
+          "then": { "required": ["from", "to", "through"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "naming-convention" } }, "required": ["type"] },
+          "then": { "required": ["layer", "require"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "max-dependencies" } }, "required": ["type"] },
+          "then": { "required": ["layer", "max", "countBy"] }
+        }
+      ]
+    }
+  }
+}

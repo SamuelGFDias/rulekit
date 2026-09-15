@@ -83,14 +83,22 @@ namespace Arch.Config
         }
 
         /// <summary>
-        /// Overload interno que já recebe os textos YAML de uma cadeia de `extends` resolvida
+        /// Overload que já recebe os textos YAML de uma cadeia de `extends` resolvida
         /// pelo chamador (ex.: [conteúdo de arch-rules.base.yaml, conteúdo de arch-rules.yaml]),
         /// em ordem crescente de precedência — o último documento é o que declara `extends` dos
         /// anteriores e vence qualquer conflito (merge por nome/`id` em `layers`/`rules`,
         /// ADR-001 D2). Passar uma lista com um único elemento equivale a
         /// <see cref="Parse(string)"/>.
         /// </summary>
-        internal static ArchConfigParseResult Parse(IReadOnlyList<string> yamlTextsInPrecedenceOrder)
+        /// <remarks>
+        /// Público desde a Fase 3: além de <c>Arch.Config.Tests</c> (via
+        /// <c>InternalsVisibleTo</c>, que continua valendo), <c>Arch.Cli</c>
+        /// (<c>arch-rules gen</c>/<c>arch-rules validate</c>) é um consumidor de produção
+        /// legítimo deste overload — ele resolve `extends` de verdade a partir do disco (I/O que,
+        /// como documentado acima, é responsabilidade de quem chama o parser) e precisa passar a
+        /// lista de textos já na ordem de precedência correta.
+        /// </remarks>
+        public static ArchConfigParseResult Parse(IReadOnlyList<string> yamlTextsInPrecedenceOrder)
         {
             if (yamlTextsInPrecedenceOrder == null || yamlTextsInPrecedenceOrder.Count == 0)
             {
