@@ -1,138 +1,269 @@
 name: CI
 
-# Trilha 1C (infra-tests) da Fase 1 do PLANO-implementacao.md.
+# Build + testes + pack + smoke de consumo + validação em host .NET Framework + orçamento de performance.
 #
-# Este pipeline cobre build + test + pack + smoke de consumo em host .NET puro
-# (ubuntu-latest / dotnet CLI). A validação em host .NET Framework/Visual Studio (o outro
-# host citado no ADR-001 §5 "Empacotamento") fica DELIBERADAMENTE FORA deste pipeline:
-# GitHub Actions ubuntu-latest não tem VS instalado, e simular esse host exigiria um runner
-# windows-latest com steps adicionais (instalar VS Build Tools, abrir uma solução real na
-# IDE ou automatizar via devenv/vstest). Não implementado agora — rastreado em
-# https://github.com/SamuelGFDias/rulekit/issues/1.
+# Cada passo abaixo foi reproduzido localmente antes de virar YAML (ver o histórico do commit). Os
+# comandos são os mesmos de um desenvolvedor: nada aqui depende de estado do runner além do SDK
+# fixado em global.json.
 #
-# Por que "build" e "pack + smoke" são jobs/steps separados, e por que o job de build NÃO
-# roda "dotnet build RuleKit.sln" de uma vez só:
-#
-#   tests/Arch.Spike.Consumer consome Arch.Analyzer.Spike e Arch.Spike.ControlAnalyzer via
-#   PackageReference contra um feed NuGet LOCAL (tests/_local-nuget-feed), populado só pelo
-#   `dotnet pack` desses dois projetos — os .nupkg não são versionados (tests/.gitignore).
-#   Em checkout limpo, restaurar Arch.Spike.Consumer falha (NU1101) antes desse pack rodar.
-#   Por isso o job "build-and-test" restaura/builda a solução MENOS Arch.Spike.Consumer, e o
-#   job "pack-and-smoke" empacota os dois analyzers de spike primeiro e só then builda o
-#   Consumer contra o pacote recém-gerado.
-#
-#   Além disso, o build de Arch.Spike.Consumer É DESENHADO PARA FALHAR (exit code != 0): seu
-#   .editorconfig escala ARCH0001 para "error" de propósito, provando o gate da Fase 0 (ADR-001
-#   §3, pool de slots) — "o .editorconfig, não o YAML, decide a severidade efetiva". O passo de
-#   smoke abaixo trata esse "erro" de build como o resultado ESPERADO e falha o job apenas se
-#   ARCH0001 não aparecer (regra não disparou) ou se AD0001 aparecer (id fora de
-#   SupportedDiagnostics — o pool de slots quebrou, risco documentado no PLANO-implementacao.md).
-#
-# RuleKit.sln (raiz do repo, gerado via `dotnet new sln` + `dotnet sln add`) continua listando
-# todos os projetos, Arch.Spike.Consumer incluído — é o inventário de projetos do repositório
-# para uso local/IDE; o CI só não invoca `dotnet build`/`dotnet restore` nele de uma vez por
-# causa da dependência de ordem acima.
+# Versão dos pacotes: MinVer, a partir de tags git `v*` (por isso `fetch-depth: 0` onde se builda).
+# Sem tag, a versão é 0.0.0-alpha.0.<altura>; os jobs descobrem a versão pelo NOME do .nupkg gerado
+# no build-test, nunca por cálculo próprio.
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
-  DOTNET_VERSION: "10.0.x"
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+  # Raiz do dogfood (consumidor real do pacote) e a política que ele usa.
+  DOGFOOD_PROJECT: tests/Arch.Dogfood/Arch.Dogfood.Sample
+  DOGFOOD_RULES: tests/Arch.Dogfood/Arch.Dogfood.Sample/arch-rules.yaml
 
 jobs:
-  build-and-test:
-    name: Build + Test (tudo exceto Arch.Spike.Consumer)
+  build-test:
+    name: Build + testes + pack
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configurar .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
         with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
 
       - name: Restore
+        run: dotnet restore RuleKit.sln
+
+      - name: Build (Release)
+        run: dotnet build RuleKit.sln -c Release --no-restore
+
+      # `dotnet test` na solução roda os 5 projetos de teste: Arch.Config.Tests, Arch.Analyzer.Tests,
+      # Arch.Rules.Tests, Arch.Cli.Tests e Arch.TestHarness. Arch.Benchmarks só compila.
+      - name: Testes
+        run: dotnet test RuleKit.sln -c Release --no-build
+
+      # --no-build: o ILRepack (build/ilrepack.targets) roda só no pack, sobre o build Release acima.
+      - name: Pack RuleKit.Analyzer e RuleKit.Cli
         run: |
-          set -euo pipefail
-          for proj in \
-            src/Arch.Analyzer/Arch.Analyzer.csproj \
-            src/Arch.Config/Arch.Config.csproj \
-            tests/Arch.Analyzer.Tests/Arch.Analyzer.Tests.csproj \
-            tests/Arch.Spike.ControlAnalyzer/Arch.Spike.ControlAnalyzer.csproj \
-            tests/Arch.TestHarness/Arch.TestHarness.csproj \
-            tests/Arch.Benchmarks/Arch.Benchmarks.csproj; do
-            dotnet restore "$proj"
-          done
+          dotnet pack src/Arch.Analyzer -c Release --no-build -o artifacts
+          dotnet pack src/Arch.Cli -c Release --no-build -o artifacts
+          ls -l artifacts
 
-      - name: Build
-        run: |
-          set -euo pipefail
-          for proj in \
-            src/Arch.Analyzer/Arch.Analyzer.csproj \
-            src/Arch.Config/Arch.Config.csproj \
-            tests/Arch.Analyzer.Tests/Arch.Analyzer.Tests.csproj \
-            tests/Arch.Spike.ControlAnalyzer/Arch.Spike.ControlAnalyzer.csproj \
-            tests/Arch.TestHarness/Arch.TestHarness.csproj \
-            tests/Arch.Benchmarks/Arch.Benchmarks.csproj; do
-            dotnet build "$proj" --configuration Release --no-restore
-          done
-
-      - name: Test
-        run: |
-          set -euo pipefail
-          dotnet test tests/Arch.Analyzer.Tests/Arch.Analyzer.Tests.csproj --configuration Release --no-build
-          dotnet test tests/Arch.TestHarness/Arch.TestHarness.csproj --configuration Release --no-build
-
-  pack-and-smoke:
-    name: Pack Arch.Analyzer + smoke de consumo (Arch.Spike.Consumer)
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configurar .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/upload-artifact@v7
         with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
+          name: nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Pack Arch.Analyzer.Spike + Arch.Spike.ControlAnalyzer no feed local
+  smoke:
+    name: Smoke de consumo (dogfood + dotnet tool)
+    needs: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: nupkg
+          path: artifacts
+
+      - name: Descobrir a versão pelo nome do .nupkg
         run: |
-          set -euo pipefail
-          dotnet pack src/Arch.Analyzer/Arch.Analyzer.csproj \
-            --configuration Release \
-            --output tests/_local-nuget-feed
-          dotnet pack tests/Arch.Spike.ControlAnalyzer/Arch.Spike.ControlAnalyzer.csproj \
-            --configuration Release \
-            --output tests/_local-nuget-feed
+          pkg=$(ls artifacts/RuleKit.Analyzer.*.nupkg)
+          ver="${pkg##*/RuleKit.Analyzer.}"
+          ver="${ver%.nupkg}"
+          test -n "$ver"
+          echo "RULEKIT_VERSION=$ver" >> "$GITHUB_ENV"
+          echo "Versão: $ver"
 
-      - name: Smoke de consumo — build de Arch.Spike.Consumer contra o pacote recém-gerado
+      # O dogfood consome o analyzer por .nupkg (não por ProjectReference), exatamente como um
+      # time externo. RestoreSources substitui o NuGet.Config do projeto (que aponta para um feed
+      # local fora do CI): o feed é artifacts/ + nuget.org (MinVer, vindo do Directory.Build.props).
+      - name: Build do dogfood contra o pacote local
         run: |
-          set -uo pipefail
-          dotnet build tests/Arch.Spike.Consumer/Arch.Spike.Consumer.csproj \
-            --configuration Release \
-            > consumer-build.log 2>&1
-          build_exit=$?
-          cat consumer-build.log
+          dotnet build "$DOGFOOD_PROJECT" -c Release --no-incremental \
+            -p:RuleKitAnalyzerVersion="$RULEKIT_VERSION" \
+            "-p:RestoreSources=$PWD/artifacts;https://api.nuget.org/v3/index.json" \
+            2>&1 | tee dogfood-build.log
 
-          # Resultado ESPERADO: build falha (exit != 0) com ARCH0001 — ver comentário no
-          # topo deste arquivo. AD0001 (id fora de SupportedDiagnostics) NUNCA pode aparecer:
-          # seria o pool de slots do ADR-001 §3 quebrado.
-          if grep -q "AD0001" consumer-build.log; then
-            echo "SMOKE FALHOU: AD0001 apareceu — pool de slots (ADR-001) quebrado." >&2
+      - name: Asserções do analyzer (ARCH0 presente, AD0001 ausente)
+        run: |
+          arch=$(grep -E "warning ARCH0[0-9]+" dogfood-build.log | sort -u | wc -l)
+          ad=$(grep -cE "(warning|error) AD0001" dogfood-build.log || true)
+          echo "diagnósticos ARCH0 distintos: $arch"
+          echo "AD0001: $ad"
+          grep -E "warning ARCH0[0-9]+" dogfood-build.log | sed -E 's/.*warning (ARCH0[0-9]+).*/\1/' | sort | uniq -c
+          if [ "$arch" -eq 0 ]; then
+            echo "::error::Nenhum 'warning ARCH0' no build do dogfood: o analyzer empacotado não avaliou a política."
+            exit 1
+          fi
+          if [ "$ad" -gt 0 ]; then
+            echo "::error::AD0001 no build do dogfood: o analyzer falhou ou reportou um id fora de SupportedDiagnostics."
             exit 1
           fi
 
-          if ! grep -q "error ARCH0001" consumer-build.log; then
-            echo "SMOKE FALHOU: ARCH0001 esperado não apareceu como erro de build." >&2
-            exit 1
-          fi
+      - name: Instalar RuleKit.Cli como dotnet tool a partir do pacote local
+        run: |
+          dotnet tool install RuleKit.Cli \
+            --add-source "$PWD/artifacts" \
+            --version "$RULEKIT_VERSION" \
+            --tool-path "$RUNNER_TEMP/tool"
 
-          if [ "$build_exit" -eq 0 ]; then
-            echo "SMOKE FALHOU: build de Arch.Spike.Consumer deveria falhar (ARCH0001 como error via .editorconfig) mas teve exit 0." >&2
-            exit 1
-          fi
+      - name: arch-rules validate / gen no arch-rules.yaml do dogfood
+        run: |
+          "$RUNNER_TEMP/tool/arch-rules" validate "$DOGFOOD_RULES"
+          "$RUNNER_TEMP/tool/arch-rules" gen "$DOGFOOD_RULES" --out "$RUNNER_TEMP/gen"
+          ls -l "$RUNNER_TEMP/gen"
+          test -s "$RUNNER_TEMP/gen/.globalconfig"
+          test -s "$RUNNER_TEMP/gen/arch-rules.lock.yaml"
 
-          echo "Smoke OK: ARCH0001 disparou como esperado via .editorconfig, sem AD0001."
+  # Fecha o que é automatizável da issue #1 (spike validado só no host .NET Core).
+  #
+  # O que PROVA: o RuleKit.Analyzer empacotado (DLL única, YamlDotNet fundido via ILRepack
+  # /internalize) é carregado e executado pelo compilador Roslyn hospedado em .NET Framework que
+  # acompanha o Visual Studio (csc.exe net472 do MSBuild do VS, não o csc do .NET SDK), sem
+  # FileLoadException/AD0001 (roslyn#41421) e produzindo diagnósticos ARCH0. É o mesmo host de
+  # compilação do Visual Studio e do `msbuild` de pipelines legados.
+  #
+  # O que NÃO prova: o live analysis no editor do Visual Studio (analyzer carregado no processo
+  # devenv.exe/ServiceHub, Error List atualizando durante a digitação, cache de
+  # SupportedDiagnostics por sessão). Isso exige a IDE e segue como verificação manual na issue #1.
+  #
+  # Consumidor: uma CÓPIA do dogfood fora do repositório. Fora dele não valem o global.json
+  # (10.0.100) nem o Central Package Management, e o MSBuild do VS 2022 (17.x) escolhe sozinho o SDK
+  # que ele suporta. Por isso o TargetFramework é rebaixado para net8.0 (sem impacto: o que se
+  # testa é o host do compilador, não o runtime do consumidor).
+  windows-vs:
+    name: Smoke no host .NET Framework (MSBuild do Visual Studio)
+    needs: build-test
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: nupkg
+          path: artifacts
+
+      - uses: microsoft/setup-msbuild@v3
+
+      - name: Preparar o consumidor (cópia do dogfood fora do repositório)
+        shell: pwsh
+        run: |
+          $pkg = Get-ChildItem artifacts -Filter 'RuleKit.Analyzer.*.nupkg' | Select-Object -First 1
+          $ver = $pkg.BaseName -replace '^RuleKit\.Analyzer\.', ''
+          if ([string]::IsNullOrEmpty($ver)) { throw 'Versão não encontrada pelo nome do .nupkg.' }
+          "RULEKIT_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "Versão: $ver"
+
+          $dst = Join-Path $env:RUNNER_TEMP 'dogfood-vs'
+          Copy-Item 'tests/Arch.Dogfood/Arch.Dogfood.Sample' $dst -Recurse
+          Remove-Item (Join-Path $dst 'NuGet.Config')
+          $csproj = Join-Path $dst 'Arch.Dogfood.Sample.csproj'
+          # Fora do repo não há Central Package Management: VersionOverride vira Version.
+          (Get-Content $csproj -Raw).Replace('VersionOverride=', 'Version=') | Set-Content $csproj -NoNewline
+
+      - name: Build com o MSBuild do Visual Studio (msbuild /restore)
+        shell: pwsh
+        run: |
+          Write-Host '--- msbuild -version'
+          msbuild -version
+          Write-Host '--- caminho do msbuild'
+          (Get-Command msbuild).Source
+
+          $feed = (Resolve-Path 'artifacts').Path
+          $proj = Join-Path $env:RUNNER_TEMP 'dogfood-vs\Arch.Dogfood.Sample.csproj'
+          $log = Join-Path $env:RUNNER_TEMP 'dogfood-vs.log'
+
+          msbuild $proj /restore /t:Rebuild /nologo /v:d `
+            /p:Configuration=Release `
+            /p:TargetFramework=net8.0 `
+            /p:ReportAnalyzer=true `
+            "/p:RuleKitAnalyzerVersion=$env:RULEKIT_VERSION" `
+            "/p:RestoreSources=$feed;https://api.nuget.org/v3/index.json" `
+            2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { throw "msbuild falhou (exit $LASTEXITCODE)." }
+
+          $lines = Get-Content $log
+
+          # Qual compilador rodou? Deve ser o Roslyn do Visual Studio (csc.exe em .NET Framework).
+          $csc = $lines | ForEach-Object { [regex]::Match($_, '[A-Za-z]:\\[^"\s]*\\csc\.exe').Value } |
+                 Where-Object { $_ } | Select-Object -First 1
+          Write-Host "--- csc usado: $csc"
+          if (-not $csc) {
+            Write-Warning 'Caminho do csc.exe não encontrado no log; a prova do host fica incompleta.'
+          } elseif ($csc -match '\\dotnet\\sdk\\') {
+            throw "O build usou o csc do .NET SDK ($csc) e não o do Visual Studio: o job não prova nada sobre o host .NET Framework."
+          }
+
+          # O analyzer apareceu na tabela do ReportAnalyzer? (informativo)
+          $lines | Select-String 'Arch\.Analyzer\.ArchRulesAnalyzer \(' | Select-Object -First 1 |
+            ForEach-Object { Write-Host "--- ReportAnalyzer: $($_.Line.Trim().Substring(0, 60))..." }
+
+          $arch = ($lines | Select-String 'warning ARCH0\d+' | ForEach-Object { $_.Line.Trim() } | Sort-Object -Unique | Measure-Object).Count
+          $ad = ($lines | Select-String '(warning|error) AD0001' | Measure-Object).Count
+          Write-Host "diagnósticos ARCH0 distintos: $arch"
+          Write-Host "AD0001: $ad"
+          if ($arch -eq 0) { throw "Nenhum 'warning ARCH0' no build com o MSBuild do VS: o analyzer não rodou nesse host." }
+          if ($ad -gt 0) { throw 'AD0001 no build com o MSBuild do VS: o analyzer falhou nesse host (roslyn#41421?).' }
+
+  # Fecha a issue #10: orçamento de < 5% de overhead de build (ADR-001, Não-funcionais/Performance),
+  # medido contra a solução de referência sintética de eng/perf/ (metodologia em eng/perf/README.md).
+  perf:
+    name: Orçamento de performance (< 5%)
+    needs: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: nupkg
+          path: artifacts
+
+      - name: Medir overhead
+        run: |
+          pkg=$(ls artifacts/RuleKit.Analyzer.*.nupkg)
+          ver="${pkg##*/RuleKit.Analyzer.}"
+          ver="${ver%.nupkg}"
+          test -n "$ver"
+          eng/perf/measure.sh --feed artifacts --version "$ver" --runs 7 --threshold 5 --work "$RUNNER_TEMP/perf"
+
+      - name: Logs de build da medição
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-logs
+          path: ${{ runner.temp }}/perf/*.log
+          if-no-files-found: ignore
+          retention-days: 7
