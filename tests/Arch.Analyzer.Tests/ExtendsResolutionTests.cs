@@ -106,6 +106,30 @@ extends: [./arch-rules.base.yaml]
         }
 
         /// <summary>
+        /// Revisão B1 (espelho de <c>Arch.Cli.Tests/ExtendsPathParityTests</c>): `\` como separador e
+        /// espaços ao redor do caminho resolvem no analyzer exatamente como no CLI.
+        /// </summary>
+        [Theory]
+        [InlineData("'.\\arch-rules.base.yaml'")]
+        [InlineData("' ./arch-rules.base.yaml '")]
+        public async Task Extends_com_barra_invertida_ou_espacos_resolve_como_no_CLI(string declared)
+        {
+            var baseYaml = LayersAndSeverities + @"rules:
+  - id: BASE-001
+    slot: ARCH0011
+    type: forbidden-call
+    from: Controller
+    to: Repository
+";
+            var mainYaml = "schema: arch-rules/v1\nextends: [" + declared + "]\n";
+
+            var diagnostics = await RunAsync((BasePath, baseYaml), (MainPath, mainYaml));
+
+            Assert.DoesNotContain("ARCH9006", Ids(diagnostics));
+            Assert.Contains("ARCH0011", Ids(diagnostics));
+        }
+
+        /// <summary>
         /// `extends` apontando para um arquivo que não está nos AdditionalFiles (o caso de quem usa
         /// um nome fora da convenção `arch-rules.*.yaml` e não acrescentou a linha no .csproj).
         ///

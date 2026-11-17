@@ -582,7 +582,7 @@ namespace Arch.Analyzer
         /// </summary>
         private static string ResolveRelativeTo(string normalizedSourcePath, string relative)
         {
-            var normalizedRelative = relative.Replace('\\', '/').Trim();
+            var normalizedRelative = ExtendsChainResolver.NormalizeDeclaredPath(relative);
 
             // Caminho já absoluto (POSIX "/x/y" ou Windows "C:/x/y") não reancora em nada.
             if (normalizedRelative.StartsWith("/", StringComparison.Ordinal) || HasDriveLetter(normalizedRelative))

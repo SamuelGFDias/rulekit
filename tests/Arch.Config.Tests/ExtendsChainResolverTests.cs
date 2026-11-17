@@ -236,5 +236,44 @@ namespace Arch.Config.Tests
             Assert.Throws<ArgumentNullException>(() => ExtendsChainResolver.Resolve("/r/a", "x", null, Combine));
             Assert.Throws<ArgumentNullException>(() => ExtendsChainResolver.Resolve("/r/a", "x", _ => null, null));
         }
-    }
+    
+        // ---- Revisão B1: normalização única do caminho declarado ----
+
+        [Fact]
+        public void Resolver_PassesTheNormalizedDeclaredPathToTheCombiner()
+        {
+            var seen = new List<string>();
+            var files = new Dictionary<string, string>
+            {
+                ["/r/root.yaml"] = "schema: arch-rules/v1\nextends: ['  .\\sub\\base.yaml ']\n",
+                ["/r/sub/base.yaml"] = "schema: arch-rules/v1\n",
+            };
+
+            var result = ExtendsChainResolver.Resolve(
+                "/r/root.yaml",
+                files["/r/root.yaml"],
+                path => files.TryGetValue(path, out var text) ? text : null,
+                (declaring, relative) =>
+                {
+                    seen.Add(relative);
+                    return Combine(declaring, relative);
+                });
+
+            Assert.Empty(result.Problems);
+            Assert.Equal(new[] { "./sub/base.yaml" }, seen);
+            // O caminho como escrito continua disponível nos problemas (mensagem fiel ao YAML).
+            Assert.Equal(2, result.Entries.Count);
+        }
+
+        [Theory]
+        [InlineData("  ./a/b.yaml ", "./a/b.yaml")]
+        [InlineData("a\\b\\c.yaml", "a/b/c.yaml")]
+        [InlineData(" ..\\x.yaml\t", "../x.yaml")]
+        [InlineData("C:\\dir\\x.yaml", "C:/dir/x.yaml")]
+        [InlineData("plain.yaml", "plain.yaml")]
+        public void NormalizeDeclaredPath_TrimsAndUnifiesSeparators(string declared, string expected)
+        {
+            Assert.Equal(expected, ExtendsChainResolver.NormalizeDeclaredPath(declared));
+        }
+}
 }

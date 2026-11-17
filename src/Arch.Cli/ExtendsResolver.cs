@@ -33,6 +33,8 @@ namespace Arch.Cli
                 rootPath,
                 File.ReadAllText(rootPath),
                 path => File.Exists(path) ? File.ReadAllText(path) : null,
+                // `relative` já chega normalizado por ExtendsChainResolver.NormalizeDeclaredPath (trim + `\`
+                // → `/`), a mesma normalização do analyzer — revisão B1.
                 (declaringPath, relative) =>
                     Path.GetFullPath(Path.Combine(Path.GetDirectoryName(declaringPath) ?? ".", relative)),
                 StringComparer.OrdinalIgnoreCase);

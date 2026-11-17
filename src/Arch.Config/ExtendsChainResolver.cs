@@ -125,6 +125,19 @@ namespace Arch.Config
         /// <summary>Quantidade máxima padrão de textos coletados antes de parar de descer.</summary>
         public const int DefaultMaxTexts = 64;
 
+        /// <summary>
+        /// Normalização ÚNICA do caminho declarado em <c>extends:</c> (revisão B1): corta espaços/tabs
+        /// nas pontas e troca <c>\</c> por <c>/</c>. O resolvedor a aplica ANTES de chamar o combinador,
+        /// então analyzer e CLI recebem o mesmo relativo — em Linux, um <c>sub\base.yaml</c> ou um
+        /// <c> base.yaml </c> não pode resolver num lado e não no outro. Puramente textual (sem I/O).
+        /// </summary>
+        public static string NormalizeDeclaredPath(string declaredPath)
+        {
+            return declaredPath == null
+                ? string.Empty
+                : declaredPath.Trim().Replace('\\', '/');
+        }
+
         /// <param name="rootPath">Caminho do arquivo raiz, já na forma que <paramref name="combinePath"/> produz.</param>
         /// <param name="rootText">Texto do arquivo raiz (o chamador já o leu).</param>
         /// <param name="loader">Caminho resolvido → texto, ou <c>null</c> quando o arquivo não existe.</param>
@@ -190,7 +203,7 @@ namespace Arch.Config
                     continue;
                 }
 
-                var target = state.CombinePath(path, declared);
+                var target = state.CombinePath(path, NormalizeDeclaredPath(declared));
 
                 if (Contains(state.Stack, target, state.Comparer))
                 {
