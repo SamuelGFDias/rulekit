@@ -2,116 +2,75 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using YamlDotNet.RepresentationModel;
+using Arch.Config;
 
 namespace Arch.Cli
 {
     /// <summary>
-    /// Erro de resolução de `extends` a partir do disco: ciclo detectado ou arquivo referenciado
-    /// inexistente. Não é um <see cref="Arch.Config.SchemaValidationError"/> porque acontece antes
-    /// de qualquer texto YAML chegar ao parser (Arch.Config.ArchConfigParser) — é um problema de
-    /// I/O/topologia da cadeia de `extends`, responsabilidade de quem chama o parser (ver XML doc
-    /// de <c>ArchConfigParser.Parse(string)</c>), não do parser em si.
-    /// </summary>
-    public sealed class ExtendsResolutionException : Exception
-    {
-        public ExtendsResolutionException(string message) : base(message)
-        {
-        }
-    }
-
-    /// <summary>
-    /// Resolve a cadeia de `extends` de um `arch-rules.yaml` a partir do disco (ADR-001 D2):
-    /// cada `extends` é uma lista de caminhos relativos ao diretório do ARQUIVO QUE OS DECLARA
-    /// (não só do arquivo raiz) — um arquivo estendido pode por sua vez estender outro, e a
-    /// resolução precisa reancorar o relativo a cada nível. Devolve os textos em ordem CRESCENTE
-    /// de precedência (base primeiro, mais específico por último), a mesma ordem exigida por
-    /// <see cref="Arch.Config.ArchConfigParser.Parse(IReadOnlyList{string})"/> — "o arquivo que faz
-    /// extends vence" (ADR-001 D2).
-    ///
-    /// Este extrator só entende `extends:` o suficiente para montar a cadeia; não valida o resto
-    /// do schema (isso é responsabilidade de <see cref="Arch.Config.ArchConfigParser"/>, chamado
-    /// depois com os textos já resolvidos). Um YAML sintaticamente inválido aqui não é reportado
-    /// por este tipo — a chamada a ArchConfigParser.Parse subsequente é que produz o
-    /// SchemaValidationError com linha/coluna precisas.
+    /// Adaptador de DISCO para <see cref="ExtendsChainResolver"/> (Arch.Config — o mesmo resolvedor
+    /// que o analyzer usa contra @(AdditionalFiles), issue #18). Aqui ficam só as decisões do CLI:
+    /// caminhos absolutos via <see cref="Path.GetFullPath(string)"/>, o loader lê do disco
+    /// (<c>null</c> quando o arquivo não existe) e a POLÍTICA de erro — todo problema de cadeia
+    /// (ausente, ciclo, profundidade) é bloqueante para `gen`/`validate`, com o código
+    /// <see cref="ExtendsErrorCode"/>. A extração de `extends:` é a de
+    /// <see cref="ArchConfigParser.PeekExtends"/>: o CLI não parseia YAML diretamente.
     /// </summary>
     public static class ExtendsResolver
     {
-        public static IReadOnlyList<string> ResolveOrderedYamlTexts(string yamlPath)
+        /// <summary>Código de diagnóstico do CLI para problema de cadeia de `extends`.</summary>
+        public const string ExtendsErrorCode = "CLI-EXTENDS";
+
+        /// <summary>
+        /// Resolve a cadeia a partir de <paramref name="yamlPath"/>. Exceções de I/O ao ler um arquivo
+        /// existente (permissão, diretório no lugar de arquivo) propagam — o chamador
+        /// (<see cref="ConfigPipeline"/>) as converte em erro limpo.
+        /// </summary>
+        public static ExtendsChainResult Resolve(string yamlPath)
         {
-            var chain = new List<string>();
-            var stack = new List<string>();
-            Resolve(Path.GetFullPath(yamlPath), stack, chain);
-            return chain;
+            var rootPath = Path.GetFullPath(yamlPath);
+
+            return ExtendsChainResolver.Resolve(
+                rootPath,
+                File.ReadAllText(rootPath),
+                path => File.Exists(path) ? File.ReadAllText(path) : null,
+                (declaringPath, relative) =>
+                    Path.GetFullPath(Path.Combine(Path.GetDirectoryName(declaringPath) ?? ".", relative)),
+                StringComparer.OrdinalIgnoreCase);
         }
 
-        private static void Resolve(string fullPath, List<string> stack, List<string> chain)
+        /// <summary>Mensagens dos problemas da cadeia, na forma que o CLI sempre imprimiu.</summary>
+        public static IReadOnlyList<CliDiagnostic> ToDiagnostics(IReadOnlyList<ExtendsChainProblem> problems)
         {
-            if (stack.Any(p => string.Equals(p, fullPath, StringComparison.OrdinalIgnoreCase)))
+            var diagnostics = new List<CliDiagnostic>(problems.Count);
+
+            foreach (var problem in problems)
             {
-                var cycleDescription = string.Join(" -> ", stack.Select(Path.GetFileName).Append(Path.GetFileName(fullPath)));
-                throw new ExtendsResolutionException($"Ciclo de 'extends' detectado: {cycleDescription}.");
-            }
-
-            if (!File.Exists(fullPath))
-            {
-                throw new ExtendsResolutionException($"Arquivo referenciado em 'extends' não encontrado: '{fullPath}'.");
-            }
-
-            stack.Add(fullPath);
-
-            var text = File.ReadAllText(fullPath);
-            var baseDir = Path.GetDirectoryName(fullPath) ?? ".";
-
-            foreach (var relative in TryExtractExtendsPaths(text))
-            {
-                var resolved = Path.GetFullPath(Path.Combine(baseDir, relative));
-                Resolve(resolved, stack, chain);
-            }
-
-            chain.Add(text);
-            stack.RemoveAt(stack.Count - 1);
-        }
-
-        private static List<string> TryExtractExtendsPaths(string yamlText)
-        {
-            var result = new List<string>();
-            try
-            {
-                var stream = new YamlStream();
-                stream.Load(new StringReader(yamlText ?? string.Empty));
-
-                if (stream.Documents.Count == 0 || !(stream.Documents[0].RootNode is YamlMappingNode root))
+                string message;
+                switch (problem.Kind)
                 {
-                    return result;
+                    case ExtendsChainProblemKind.Cycle:
+                        var cycle = string.Join(
+                            " -> ",
+                            problem.Stack.Select(Path.GetFileName).Append(Path.GetFileName(problem.ResolvedPath)));
+                        message = $"Ciclo de 'extends' detectado: {cycle}.";
+                        break;
+
+                    case ExtendsChainProblemKind.DepthExceeded:
+                        message =
+                            $"Cadeia de 'extends' longa demais ao tentar resolver '{problem.DeclaredPath}' a partir de " +
+                            $"'{problem.DeclaringPath}' (limite: {ExtendsChainResolver.DefaultMaxDepth} níveis / " +
+                            $"{ExtendsChainResolver.DefaultMaxTexts} arquivos).";
+                        break;
+
+                    default:
+                        message = $"Arquivo referenciado em 'extends' não encontrado: '{problem.ResolvedPath}'.";
+                        break;
                 }
 
-                if (!root.Children.TryGetValue(new YamlScalarNode("extends"), out var extendsNode))
-                {
-                    return result;
-                }
-
-                if (extendsNode is YamlSequenceNode sequence)
-                {
-                    foreach (var item in sequence.Children)
-                    {
-                        if (item is YamlScalarNode scalar && !string.IsNullOrWhiteSpace(scalar.Value))
-                        {
-                            result.Add(scalar.Value);
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // YAML sintaticamente inválido: não é papel deste extrator relatar o erro com
-                // linha/coluna — isso é feito por Arch.Config.ArchConfigParser ao processar o
-                // texto completo logo em seguida. Aqui basta não travar; a cadeia de extends fica
-                // incompleta, mas o próprio texto ainda entra na lista e o Parse final reporta o
-                // SchemaValidationError bloqueante de verdade.
+                diagnostics.Add(new CliDiagnostic(ExtendsErrorCode, message, 0, 0));
             }
 
-            return result;
+            return diagnostics;
         }
     }
 }

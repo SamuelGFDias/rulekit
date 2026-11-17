@@ -357,5 +357,33 @@ namespace Acme.Domain
 
             Assert.Empty(diagnostics);
         }
+
+        /// <summary>
+        /// Issue #7: genéricos são normalizados por <c>OriginalDefinition</c>, como em
+        /// <c>LayerResolver</c>/<c>ForbiddenCallEvaluator</c> — <c>IRepository&lt;Pedido&gt;</c> e
+        /// <c>IRepository&lt;Cliente&gt;</c> são UMA dependência (de <c>IRepository&lt;T&gt;</c>).
+        /// </summary>
+        [Fact]
+        public async Task Genericos_ComArgumentosDiferentes_ContamComoUmaDependencia()
+        {
+            const string source = @"
+namespace Acme.Domain
+{
+    public interface IRepository<T> { }
+    public class Pedido { } public class Cliente { } public class Produto { }
+
+    public class OrderService
+    {
+        private readonly IRepository<Produto> _produtos;
+
+        public OrderService(IRepository<Pedido> pedidos, IRepository<Cliente> clientes) { }
+    }
+}";
+            var layerResolver = new FakeLayerResolver("OrderService");
+
+            Assert.Empty(await RunAsync(source, Rule(ServiceLayer, max: "1", countBy: "constructor-parameters"), layerResolver));
+            Assert.Empty(await RunAsync(source, Rule(ServiceLayer, max: "1", countBy: "all"), layerResolver));
+            Assert.Empty(await RunAsync(source, Rule(ServiceLayer, max: "1", countBy: "fields"), layerResolver));
+        }
     }
 }

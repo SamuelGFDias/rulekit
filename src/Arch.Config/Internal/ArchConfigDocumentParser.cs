@@ -609,8 +609,11 @@ namespace Arch.Config.Internal
             // consultem a mesma chave; fora do pool fica como veio, e ARCH9002 é decidido adiante.
             var normalizedSlot = SlotPool.TryNormalize(slot, out var canonicalSlot) ? canonicalSlot : slot;
 
-            result.Rules.Add(RuleDefinition.FromProperties(
-                id, normalizedSlot, typeSchema.Name, enabled, severity, message, help, properties));
+            var rule = RuleDefinition.FromProperties(
+                id, normalizedSlot, typeSchema.Name, enabled, severity, message, help, properties);
+            rule.SourceLine = (int)ruleMap.Start.Line;
+            rule.SourceColumn = (int)ruleMap.Start.Column;
+            result.Rules.Add(rule);
             return true;
         }
 

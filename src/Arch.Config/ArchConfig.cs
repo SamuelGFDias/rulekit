@@ -91,6 +91,24 @@ namespace Arch.Config
         /// <summary>Campos específicos do tipo, tipados (issue #17, B2). Chaves sensíveis a caixa.</summary>
         public IReadOnlyDictionary<string, RulePropertyValue> Properties { get; }
 
+        /// <summary>
+        /// Linha 1-based do item da regra no YAML que a declarou (o documento de índice
+        /// <see cref="SourceDocumentIndex"/>); 0 quando desconhecida (regra montada à mão).
+        /// Preenchida pelo parser — é o que permite a quem reporta um diagnóstico sobre a regra
+        /// (ex.: ARCH9002/ARCH9005 no analyzer) apontar a linha certa (issue #7).
+        /// </summary>
+        public int SourceLine { get; internal set; }
+
+        /// <summary>Coluna 1-based correspondente a <see cref="SourceLine"/>; 0 quando desconhecida.</summary>
+        public int SourceColumn { get; internal set; }
+
+        /// <summary>
+        /// Índice, na lista passada a <see cref="ArchConfigParser.Parse(IReadOnlyList{string})"/>, do
+        /// texto que declarou a regra (com `extends`, a regra vencedora pode vir de um arquivo base);
+        /// -1 quando desconhecido.
+        /// </summary>
+        public int SourceDocumentIndex { get; internal set; } = -1;
+
         public RuleDefinition(
             string id,
             string slot,

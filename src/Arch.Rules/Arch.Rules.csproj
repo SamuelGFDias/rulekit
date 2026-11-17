@@ -4,6 +4,9 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
+    <!-- Fundido em Arch.Analyzer.dll no pack (roda dentro do compilador): mesmas regras de
+         analyzer (RS1035 — sem I/O) que Arch.Analyzer, issue #7. -->
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
   </PropertyGroup>
 
   <ItemGroup>

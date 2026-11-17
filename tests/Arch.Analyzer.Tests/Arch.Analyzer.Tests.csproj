@@ -27,6 +27,9 @@
       feita por tests/Arch.Dogfood/, que consome o pacote via PackageReference.
     -->
     <ProjectReference Include="../../src/Arch.Analyzer/Arch.Analyzer.csproj" />
+    <!-- Harness reutilizável (AnalyzerConfigWorkspaceRunner: projeto com .globalconfig real, usado
+         pelos testes de ARCH9005 — issue #8). -->
+    <ProjectReference Include="../Arch.TestHarness/Arch.TestHarness.csproj" />
   </ItemGroup>
 
   <ItemGroup>

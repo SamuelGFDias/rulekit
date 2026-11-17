@@ -68,10 +68,12 @@ public class OrderController
 
         /// <summary>
         /// Configuração equivalente ao que o YAML produzirá: duas camadas por sufixo e uma regra
-        /// `Controller -> Repository` vinculada ao slot sob teste.
+        /// `Controller -> Repository` vinculada ao slot sob teste. <paramref name="declaredSeverity"/>
+        /// é o valor de `severities.media` — o .globalconfig de cada teste precisa ser COERENTE com
+        /// ele (é o que `arch-rules gen` gera), senão o motor reporta ARCH9005 (issue #8).
         /// </summary>
-        private static ArchConfig PolicyConfig()
-            => Policy(
+        private static ArchConfig PolicyConfig(string declaredSeverity = "warning")
+            => WithDeclaredSeverity(Policy(
                 new[]
                 {
                     Layer("Controller", new[] { NameSuffix("Controller") }),
@@ -84,7 +86,15 @@ public class OrderController
                         SlotUnderTest,
                         TestForbiddenNameEvaluator.TypeName,
                         TestForbiddenNameEvaluator.Extra("Controller", "Repository")),
-                });
+                }), declaredSeverity);
+
+        private static ArchConfig WithDeclaredSeverity(ArchConfig config, string declaredSeverity)
+            => new ArchConfig(
+                config.Schema,
+                config.Layers,
+                config.Rules,
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["media"] = declaredSeverity },
+                config.DefaultSeverityName);
 
         /// <summary>
         /// Variante que (a) injeta o analyzer com um avaliador de teste registrado e a config já
@@ -94,13 +104,15 @@ public class OrderController
         /// </summary>
         private sealed class ConfigAwareAnalyzerTest : CSharpAnalyzerTest<ArchRulesAnalyzer, DefaultVerifier>
         {
+            internal string DeclaredSeverity { get; set; } = "warning";
+
             protected override IEnumerable<DiagnosticAnalyzer> GetDiagnosticAnalyzers()
             {
                 return new DiagnosticAnalyzer[]
                 {
                     new ArchRulesAnalyzer(
                         RuleEvaluatorRegistry.Create(new TestForbiddenNameEvaluator()),
-                        Parser(PolicyConfig())),
+                        Parser(PolicyConfig(DeclaredSeverity))),
                 };
             }
 
@@ -113,10 +125,14 @@ public class OrderController
             }
         }
 
-        private static ConfigAwareAnalyzerTest CreateTest(string analyzerConfigPath = null, string analyzerConfigContent = null)
+        private static ConfigAwareAnalyzerTest CreateTest(
+            string analyzerConfigPath = null,
+            string analyzerConfigContent = null,
+            string declaredSeverity = "warning")
         {
             var test = new ConfigAwareAnalyzerTest
             {
+                DeclaredSeverity = declaredSeverity,
                 TestState =
                 {
                     Sources = { Source },
@@ -182,9 +198,11 @@ public class OrderController
         [InlineData("silent", DiagnosticSeverity.Hidden)]
         public async Task GlobalConfig_Accepts_Suggestion_And_Silent_Severities(string severityName, DiagnosticSeverity expectedSeverity)
         {
+            // YAML coerente com o .globalconfig (como `arch-rules gen` gera): sem ARCH9005.
             var test = CreateTest(
                 "/0/test.globalconfig",
-                "is_global = true\n\ndotnet_diagnostic." + SlotUnderTest + ".severity = " + severityName + "\n");
+                "is_global = true\n\ndotnet_diagnostic." + SlotUnderTest + ".severity = " + severityName + "\n",
+                declaredSeverity: severityName);
 
             test.ExpectedDiagnostics.Add(
                 new DiagnosticResult(SlotUnderTest, expectedSeverity)

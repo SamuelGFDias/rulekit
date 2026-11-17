@@ -31,19 +31,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Precisa de Arch.Config.ArchConfigParser (overload público que resolve `extends` já
-         resolvido pelo chamador — a resolução de I/O em si é feita aqui no CLI, ver
-         ExtendsResolver.cs). -->
+    <!-- Arch.Config: parser (ArchConfigParser.Parse da cadeia), ExtendsChainResolver (resolução
+         de `extends`, compartilhada com o analyzer — issue #18; aqui só o loader de disco, ver
+         ExtendsResolver.cs), SlotPool e SeverityVocabulary. O CLI não referencia YamlDotNet
+         diretamente: a única leitura de YAML é a do Arch.Config, que o traz por transitividade. -->
     <ProjectReference Include="../Arch.Config/Arch.Config.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Mesma versão usada por Arch.Config (src/Arch.Config/Arch.Config.csproj), só para extrair
-         a chave `extends:` de cada arquivo YAML no disco antes de chamar o parser público (ver
-         ExtendsResolver.cs) — não há aqui a restrição de "nunca DLL separada" do ADR-001 D1, que
-         é específica do analyzer hospedado dentro do compilador (roslyn#41421); o CLI é um
-         executável .NET comum. -->
-    <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
   <!--

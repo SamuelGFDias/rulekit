@@ -32,6 +32,14 @@ namespace Arch.Config
         /// demais regras de valerem (ex.: ARCH9003 — tipo de regra desconhecido).</summary>
         public bool IsBlocking { get; }
 
+        /// <summary>
+        /// Índice, na lista passada a <see cref="ArchConfigParser.Parse(IReadOnlyList{string})"/>, do
+        /// texto em que <see cref="Line"/>/<see cref="Column"/> valem; -1 quando desconhecido (erro
+        /// criado fora do parser, ou sem documento específico). Com `extends`, a linha de um erro só
+        /// faz sentido no arquivo que o produziu (issue #7).
+        /// </summary>
+        public int SourceDocumentIndex { get; internal set; } = -1;
+
         public SchemaValidationError(string code, string message, int line, int column, bool isBlocking)
         {
             Code = code ?? throw new ArgumentNullException(nameof(code));
@@ -109,9 +117,23 @@ namespace Arch.Config
             try
             {
                 var parsedDocuments = new List<ParsedDocument>(yamlTextsInPrecedenceOrder.Count);
-                foreach (var yamlText in yamlTextsInPrecedenceOrder)
+                for (var index = 0; index < yamlTextsInPrecedenceOrder.Count; index++)
                 {
-                    parsedDocuments.Add(ArchConfigDocumentParser.Parse(yamlText));
+                    var document = ArchConfigDocumentParser.Parse(yamlTextsInPrecedenceOrder[index]);
+
+                    // Cada regra/erro lembra de QUAL texto da cadeia veio, para que a linha/coluna
+                    // possa ser ancorada no arquivo certo depois do merge.
+                    foreach (var rule in document.Rules)
+                    {
+                        rule.SourceDocumentIndex = index;
+                    }
+
+                    foreach (var error in document.Errors)
+                    {
+                        error.SourceDocumentIndex = index;
+                    }
+
+                    parsedDocuments.Add(document);
                 }
 
                 merged = ArchConfigMerger.Merge(parsedDocuments);

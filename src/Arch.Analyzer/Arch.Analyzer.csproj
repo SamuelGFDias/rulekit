@@ -4,7 +4,10 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
-    <EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
+    <!-- Liga a família RS1035 (APIs banidas em analyzers: I/O de arquivo, Environment etc.) —
+         issue #7. O analyzer roda dentro do compilador e não pode fazer I/O; resolver `extends`
+         "lendo do disco" seria um erro silencioso sem isto. -->
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 
     <!-- Empacotamento de analyzer (ADR-001 §5, "Empacotamento") -->
     <!-- PackageId público é RuleKit.Analyzer; AssemblyName/namespaces continuam Arch.Analyzer.

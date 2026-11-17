@@ -7,3 +7,9 @@ using System.Runtime.CompilerServices;
 // depender da trilha 1A) — daí o InternalsVisibleTo, que é o mecanismo padrão para isso e não
 // aumenta a API pública do pacote.
 [assembly: InternalsVisibleTo("Arch.Analyzer.Tests")]
+
+// Benchmarks de memoização do LayerResolver (tests/Arch.Benchmarks) chamam LayerResolver.Create
+// diretamente. Antes isso era feito por reflexão + Delegate.CreateDelegate, um contorno para tipos
+// duplicados entre o Arch.Analyzer.dll fundido e as DLLs soltas — que deixou de existir quando o
+// ILRepack passou a rodar só no `dotnet pack` (issue #11, item 3).
+[assembly: InternalsVisibleTo("Arch.Benchmarks")]

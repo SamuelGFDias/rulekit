@@ -30,6 +30,13 @@ namespace Arch.Rules
     /// arquiteturais diferentes).
     /// </item>
     /// <item>
+    /// <b>Genéricos normalizados pela definição original.</b> <c>IRepository&lt;Pedido&gt;</c> e
+    /// <c>IRepository&lt;Cliente&gt;</c> contam como UMA dependência (de <c>IRepository&lt;T&gt;</c>)
+    /// — a mesma convenção de <c>LayerResolver</c> e <c>ForbiddenCallEvaluator</c>, que sempre
+    /// classificam um genérico construído pela sua <c>OriginalDefinition</c> (issue #7). O
+    /// acoplamento arquitetural é com a abstração genérica, não com cada instanciação dela.
+    /// </item>
+    /// <item>
     /// <b>`fields`</b>: conta apenas campos de instância `private`/`protected` DECLARADOS
     /// DIRETAMENTE no tipo (não herdados — <see cref="INamedTypeSymbol.GetMembers()"/> já não traz
     /// membros herdados), cujo tipo não seja primitivo/`string`/enum — esses são dados de valor, não
@@ -162,7 +169,7 @@ namespace Arch.Rules
 
             foreach (var parameter in biggestPublicConstructor.Parameters)
             {
-                dependencyTypes.Add(parameter.Type);
+                dependencyTypes.Add(Normalize(parameter.Type));
             }
         }
 
@@ -187,9 +194,16 @@ namespace Arch.Rules
                     continue;
                 }
 
-                dependencyTypes.Add(field.Type);
+                dependencyTypes.Add(Normalize(field.Type));
             }
         }
+
+        /// <summary>
+        /// Genérico construído → definição original (<c>IRepository&lt;Pedido&gt;</c> →
+        /// <c>IRepository&lt;T&gt;</c>), a mesma normalização de <c>LayerResolver</c> e
+        /// <c>ForbiddenCallEvaluator</c>.
+        /// </summary>
+        private static ITypeSymbol Normalize(ITypeSymbol type) => type.OriginalDefinition ?? type;
 
         private static bool IsValueLikeType(ITypeSymbol type)
         {

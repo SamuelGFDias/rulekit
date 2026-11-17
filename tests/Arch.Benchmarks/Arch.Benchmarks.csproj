@@ -52,8 +52,8 @@
 
   <ItemGroup>
     <!--
-      Referencia o analyzer real (ArchRulesAnalyzer, LayerResolver via reflexão, RuleEvaluatorRegistry
-      real). Este projeto só CONSOME src/Arch.Analyzer (ProjectReference), nunca edita nada sob
+      Referencia o analyzer real (ArchRulesAnalyzer, LayerResolver — chamado diretamente via
+      InternalsVisibleTo, sem reflexão desde a issue #11 —, RuleEvaluatorRegistry real). Este projeto só CONSOME src/Arch.Analyzer (ProjectReference), nunca edita nada sob
       src/** — ver fronteira da trilha 1C (infra-tests) e 4C (perf-audit) no PLANO-implementacao.md.
     -->
     <ProjectReference Include="../../src/Arch.Analyzer/Arch.Analyzer.csproj" />

@@ -63,11 +63,9 @@ namespace Arch.Analyzer
         internal static readonly DiagnosticDescriptor Arch9004;
 
         /// <summary>
-        /// ARCH9005 — divergência entre a severidade declarada no YAML e a efetiva no
-        /// `.globalconfig` (ADR-001 D3). Declarado desde já para que o ID exista em
-        /// <see cref="Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer.SupportedDiagnostics"/>
-        /// quando a Fase 3 (CLI gerador) passar a reportá-lo — acrescentar um ID depois é barato,
-        /// mas reportar um ID não declarado nunca funciona (AD0001).
+        /// ARCH9005 — divergência entre a severidade declarada no YAML e a efetiva do slot na
+        /// compilação (ADR-001 D3). Reportado pelo analyzer no compilation-start, um por regra —
+        /// ver <see cref="SeverityDivergence"/> para a precedência e as limitações.
         /// </summary>
         internal static readonly DiagnosticDescriptor Arch9005;
 
@@ -164,8 +162,9 @@ namespace Arch.Analyzer
                 defaultSeverity: DiagnosticSeverity.Info,
                 description:
                     "A severidade declarada no arch-rules.yaml não corresponde à severidade efetiva do slot no " +
-                    ".editorconfig/.globalconfig — sinal de que `arch-rules gen` não foi reexecutado (ADR-001 D3). " +
-                    "Reservado: reportado a partir da Fase 3.");
+                    ".globalconfig (ou em /warnaserror, /nowarn, ruleset) — sinal de que `arch-rules gen` não foi " +
+                    "reexecutado (ADR-001 D3). Um por regra, apontando a regra no YAML. .editorconfig por arquivo não " +
+                    "entra na comparação.");
 
             // ARCH9006/ARCH9007 são reportados SÓ pelo analyzer (nunca pelo parser de Arch.Config):
             // eles descrevem a resolução da cadeia de `extends` contra @(AdditionalFiles), que é

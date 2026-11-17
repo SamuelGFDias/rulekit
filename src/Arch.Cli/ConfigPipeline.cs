@@ -1,17 +1,20 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using Arch.Config;
 
 namespace Arch.Cli
 {
     /// <summary>
     /// Pipeline compartilhado por `arch-rules gen` e `arch-rules validate`: resolve `extends` a
-    /// partir do disco (<see cref="ExtendsResolver"/>), parseia com
+    /// partir do disco (<see cref="ExtendsResolver"/>, adaptador de
+    /// <see cref="ExtendsChainResolver"/>), parseia com
     /// <see cref="ArchConfigParser.Parse(IReadOnlyList{string})"/>, e roda as duas validações que
     /// o parser puro de Arch.Config não faz — slot fora do pool/duplicado
     /// (<see cref="SlotValidator"/>) e severidade fora do vocabulário do AnalyzerConfig
     /// (<see cref="SeverityResolver"/>).
     ///
-    /// Erro bloqueante em qualquer etapa (extends malformado/cíclico, schema `IsBlocking = true`,
+    /// Erro bloqueante em qualquer etapa (extends ausente/cíclico/profundo demais, schema `IsBlocking = true`,
     /// slot inválido, severidade inválida) impede a geração de qualquer arquivo — a decisão de
     /// "sem gerar nada" é do chamador (<see cref="GenCommand"/>/<see cref="ValidateCommand"/>),
     /// que consulta <see cref="Result.Success"/>.
@@ -45,18 +48,32 @@ namespace Arch.Cli
             var blocking = new List<CliDiagnostic>();
             var warnings = new List<CliDiagnostic>();
 
-            IReadOnlyList<string> orderedTexts;
+            ExtendsChainResult chain;
             try
             {
-                orderedTexts = ExtendsResolver.ResolveOrderedYamlTexts(yamlPath);
+                chain = ExtendsResolver.Resolve(yamlPath);
             }
-            catch (ExtendsResolutionException ex)
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
-                blocking.Add(new CliDiagnostic("CLI-EXTENDS", ex.Message, 0, 0));
+                // Arquivo existente mas ilegível (permissão, diretório no lugar de arquivo): erro de
+                // configuração limpo em vez de exceção (issue #4).
+                blocking.Add(new CliDiagnostic(
+                    "ARCH9001",
+                    $"Não foi possível ler a configuração ou um arquivo de 'extends' ({ex.GetType().Name}): {ex.Message}",
+                    0,
+                    0));
                 return new Result(null, null, blocking, warnings);
             }
 
-            var parseResult = ArchConfigParser.Parse(orderedTexts);
+            if (chain.Problems.Count > 0)
+            {
+                // Política do CLI: qualquer problema de cadeia é bloqueante (gerar um .globalconfig
+                // de uma política incompleta seria pior que não gerar nada).
+                blocking.AddRange(ExtendsResolver.ToDiagnostics(chain.Problems));
+                return new Result(null, null, blocking, warnings);
+            }
+
+            var parseResult = ArchConfigParser.Parse(chain.Texts);
 
             foreach (var error in parseResult.Errors)
             {

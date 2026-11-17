@@ -35,7 +35,8 @@ namespace Arch.Analyzer
     /// disco (RS1035), então o que não foi passado pelo MSBuild simplesmente não existe para ele. O
     /// <c>build/RuleKit.Analyzer.targets</c> do pacote inclui por convenção <c>arch-rules.yaml</c> e
     /// <c>arch-rules.*.yaml</c> do diretório do projeto; um `extends` fora dessa convenção vira
-    /// <c>ARCH9006</c> (warning, NÃO bloqueante — ver <see cref="ResolveChain"/>).</para>
+    /// <c>ARCH9006</c> (warning, NÃO bloqueante — ver <see cref="ResolveChain"/>). Ciclo,
+    /// profundidade e ordem vêm de <see cref="ExtendsChainResolver"/>, compartilhado com o CLI.</para>
     /// </summary>
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
     public sealed class ArchRulesAnalyzer : DiagnosticAnalyzer
@@ -104,6 +105,8 @@ namespace Arch.Analyzer
         /// principal (último da lista, ver
         /// <see cref="ArchConfigParser.Parse(IReadOnlyList{string})"/>). Quem quiser exercitar o
         /// merge real deve usar o construtor público (parser de produção) ou o overload de cadeia.
+        /// Pelo mesmo motivo, um <c>SourceDocumentIndex</c> devolvido por este seam é relativo a UM
+        /// texto e não é confiável para ancorar a localização numa cadeia com `extends`.
         /// </summary>
         internal ArchRulesAnalyzer(
             IReadOnlyDictionary<string, IRuleEvaluator> evaluators,
@@ -164,7 +167,7 @@ namespace Arch.Analyzer
                     continue;
                 }
 
-                engineDiagnostics.Add(CreateEngineDiagnostic(additionalFile, sourceText, error));
+                engineDiagnostics.Add(CreateEngineDiagnostic(cached, additionalFile, sourceText, error));
             }
 
             if (cached.HasBlockingError || cached.Config == null)
@@ -202,9 +205,11 @@ namespace Arch.Analyzer
                 DiagnosticDescriptor slotDescriptor;
                 if (!ArchDiagnostics.TryGetSlot(rule.Slot, out slotDescriptor))
                 {
-                    engineDiagnostics.Add(CreateEngineDiagnostic(
+                    engineDiagnostics.Add(CreateRuleDiagnostic(
+                        cached,
                         additionalFile,
                         sourceText,
+                        rule,
                         ArchDiagnostics.Arch9002,
                         "Regra '" + rule.Id + "' ignorada: slot '" + rule.Slot + "' está fora do pool pré-declarado " +
                         "(ARCH0001..ARCH" + ArchDiagnostics.SlotCount.ToString("D4", CultureInfo.InvariantCulture) + ")."));
@@ -213,9 +218,11 @@ namespace Arch.Analyzer
 
                 if (!slotsInUse.Add(slotDescriptor.Id))
                 {
-                    engineDiagnostics.Add(CreateEngineDiagnostic(
+                    engineDiagnostics.Add(CreateRuleDiagnostic(
+                        cached,
                         additionalFile,
                         sourceText,
+                        rule,
                         ArchDiagnostics.Arch9002,
                         "Regra '" + rule.Id + "' ignorada: o slot '" + slotDescriptor.Id + "' já está vinculado a " +
                         "outra regra. Dois IDs de negócio no mesmo slot tornariam impossível dar override de " +
@@ -227,13 +234,25 @@ namespace Arch.Analyzer
                 if (!_evaluators.TryGetValue(rule.Type, out evaluator) || evaluator == null)
                 {
                     // ADR-001 D4 (MINOR aditivo): tipo desconhecido é ARCH9003 e não derruba o resto.
-                    engineDiagnostics.Add(CreateEngineDiagnostic(
+                    engineDiagnostics.Add(CreateRuleDiagnostic(
+                        cached,
                         additionalFile,
                         sourceText,
+                        rule,
                         ArchDiagnostics.Arch9003,
                         "Regra '" + rule.Id + "' ignorada: tipo de regra '" + rule.Type + "' não é suportado por esta " +
                         "versão da lib."));
                     continue;
+                }
+
+                // ARCH9005 (ADR-001 D3, issue #8): uma vez por regra, no compilation-start — a
+                // severidade efetiva do slot é da compilação, não de um símbolo.
+                var divergence = SeverityDivergence.Describe(
+                    context.Compilation, cached.Config, rule, slotDescriptor, context.CancellationToken);
+                if (divergence != null)
+                {
+                    engineDiagnostics.Add(CreateRuleDiagnostic(
+                        cached, additionalFile, sourceText, rule, ArchDiagnostics.Arch9005, divergence));
                 }
 
                 evaluator.RegisterActions(context, rule, layerResolver, slotDescriptor);
@@ -300,7 +319,7 @@ namespace Arch.Analyzer
 
             try
             {
-                ResolveChain(additionalFiles, mainFile, mainText, NormalizePath(mainFile.Path), chain, 0, cancellationToken);
+                ResolveChain(additionalFiles, mainFile, mainText, chain, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -346,11 +365,10 @@ namespace Arch.Analyzer
         }
 
         /// <summary>
-        /// Percorre a cadeia de `extends` em profundidade e PÓS-ORDEM: cada arquivo estendido entra
-        /// na lista antes de quem o estende, o que produz exatamente a ordem crescente de precedência
-        /// exigida por <see cref="ArchConfigParser.Parse(IReadOnlyList{string})"/> — "o arquivo que
-        /// faz extends vence" (ADR-001 D2). Mesma semântica de <c>Arch.Cli.ExtendsResolver</c>, que
-        /// resolve do disco; a diferença é a fonte: aqui, só @(AdditionalFiles).
+        /// Resolve a cadeia de `extends` com <see cref="ExtendsChainResolver"/> (o mesmo resolvedor
+        /// do CLI — ciclo, profundidade e ordem pós-ordem moram lá, issue #18) e aplica a POLÍTICA do
+        /// analyzer: ausente → ARCH9006, ciclo/profundidade → ARCH9007, ambos não bloqueantes. A
+        /// diferença para o CLI é só a fonte dos textos: aqui, @(AdditionalFiles) e nada mais.
         ///
         /// <para><b>Decisão de design — `extends` ausente NÃO é bloqueante.</b> Um caminho sem
         /// AdditionalFile correspondente vira ARCH9006 (warning) e o RAMO é descartado; a lista de
@@ -366,81 +384,105 @@ namespace Arch.Analyzer
         /// resolvidos lexicalmente, comparação case-insensitive) — nunca via <c>File.Exists</c> ou
         /// <c>Path.GetFullPath</c>, que tocariam o disco e violariam RS1035.</para>
         /// </summary>
-        private void ResolveChain(
+        private static void ResolveChain(
             ImmutableArray<AdditionalText> additionalFiles,
-            AdditionalText file,
-            SourceText text,
-            string normalizedPath,
+            AdditionalText mainFile,
+            SourceText mainText,
             ChainResolution chain,
-            int depth,
             CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var rootPath = NormalizePath(mainFile.Path);
+            var sourceByPath = new Dictionary<string, ChainFile>(StringComparer.OrdinalIgnoreCase);
+            var foundWithoutText = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            chain.Stack.Add(normalizedPath);
-            chain.Files.Add(new ChainFile(file.Path, text));
+            sourceByPath[rootPath] = new ChainFile(mainFile.Path, mainText);
+            chain.Files.Add(new ChainFile(mainFile.Path, mainText));
 
-            var content = text.ToString();
-
-            foreach (var relative in ArchConfigParser.PeekExtends(content))
+            Func<string, string> loader = target =>
             {
-                if (string.IsNullOrWhiteSpace(relative))
-                {
-                    continue;
-                }
-
-                var target = ResolveRelativeTo(normalizedPath, relative);
-
-                if (ContainsPath(chain.Stack, target))
-                {
-                    chain.Issues.Add(Issue(
-                        "ARCH9007",
-                        "Ciclo de 'extends' detectado: " + string.Join(" -> ", chain.Stack) + " -> " + target +
-                        ". O ramo foi cortado; as demais camadas continuam valendo."));
-                    continue;
-                }
-
-                if (depth + 1 >= MaxChainDepth || chain.Texts.Count >= MaxChainTexts)
-                {
-                    chain.Issues.Add(Issue(
-                        "ARCH9007",
-                        "Cadeia de 'extends' longa demais ao tentar resolver '" + relative + "' a partir de '" +
-                        normalizedPath + "' (limite: " + MaxChainDepth + " níveis / " + MaxChainTexts +
-                        " arquivos). O ramo foi cortado."));
-                    continue;
-                }
-
                 var found = FindByNormalizedPath(additionalFiles, target);
                 if (found == null)
                 {
-                    chain.MissingPaths.Add(target);
-                    chain.Issues.Add(Issue(
-                        "ARCH9006",
-                        "Arquivo de extends '" + relative + "' declarado em '" + Path.GetFileName(normalizedPath) +
-                        "' (resolvido para '" + target + "') não foi encontrado nos AdditionalFiles — adicione-o " +
-                        "manualmente ao .csproj (<AdditionalFiles Include=\"...\" />) ou siga a convenção de nome " +
-                        "`arch-rules.*.yaml` no diretório do projeto. A camada foi ignorada; as demais regras " +
-                        "continuam valendo."));
-                    continue;
+                    return null;
                 }
 
                 var foundText = found.GetText(cancellationToken);
                 if (foundText == null)
                 {
-                    chain.MissingPaths.Add(target);
-                    chain.Issues.Add(Issue(
-                        "ARCH9006",
-                        "Arquivo de extends '" + relative + "' está em AdditionalFiles ('" + found.Path +
-                        "') mas o host não devolveu texto para ele. A camada foi ignorada; as demais regras " +
-                        "continuam valendo."));
-                    continue;
+                    foundWithoutText[target] = found.Path;
+                    return null;
                 }
 
-                ResolveChain(additionalFiles, found, foundText, target, chain, depth + 1, cancellationToken);
+                var chainFile = new ChainFile(found.Path, foundText);
+                chain.Files.Add(chainFile);
+                sourceByPath[target] = chainFile;
+                return foundText.ToString();
+            };
+
+            var resolution = ExtendsChainResolver.Resolve(
+                rootPath,
+                mainText.ToString(),
+                loader,
+                ResolveRelativeTo,
+                StringComparer.OrdinalIgnoreCase,
+                MaxChainDepth,
+                MaxChainTexts,
+                cancellationToken);
+
+            foreach (var entry in resolution.Entries)
+            {
+                chain.Texts.Add(entry.Text);
+
+                ChainFile source;
+                chain.Sources.Add(sourceByPath.TryGetValue(entry.Path, out source) ? source : default(ChainFile));
             }
 
-            chain.Texts.Add(content);
-            chain.Stack.RemoveAt(chain.Stack.Count - 1);
+            foreach (var problem in resolution.Problems)
+            {
+                switch (problem.Kind)
+                {
+                    case ExtendsChainProblemKind.Cycle:
+                        chain.Issues.Add(Issue(
+                            "ARCH9007",
+                            "Ciclo de 'extends' detectado: " + string.Join(" -> ", problem.Stack) + " -> " +
+                            problem.ResolvedPath + ". O ramo foi cortado; as demais camadas continuam valendo."));
+                        break;
+
+                    case ExtendsChainProblemKind.DepthExceeded:
+                        chain.Issues.Add(Issue(
+                            "ARCH9007",
+                            "Cadeia de 'extends' longa demais ao tentar resolver '" + problem.DeclaredPath +
+                            "' a partir de '" + problem.DeclaringPath + "' (limite: " + MaxChainDepth + " níveis / " +
+                            MaxChainTexts + " arquivos). O ramo foi cortado."));
+                        break;
+
+                    default:
+                        chain.MissingPaths.Add(problem.ResolvedPath);
+
+                        string foundPath;
+                        if (foundWithoutText.TryGetValue(problem.ResolvedPath, out foundPath))
+                        {
+                            chain.Issues.Add(Issue(
+                                "ARCH9006",
+                                "Arquivo de extends '" + problem.DeclaredPath + "' está em AdditionalFiles ('" +
+                                foundPath + "') mas o host não devolveu texto para ele. A camada foi ignorada; as " +
+                                "demais regras continuam valendo."));
+                        }
+                        else
+                        {
+                            chain.Issues.Add(Issue(
+                                "ARCH9006",
+                                "Arquivo de extends '" + problem.DeclaredPath + "' declarado em '" +
+                                Path.GetFileName(problem.DeclaringPath) + "' (resolvido para '" + problem.ResolvedPath +
+                                "') não foi encontrado nos AdditionalFiles — adicione-o manualmente ao .csproj " +
+                                "(<AdditionalFiles Include=\"...\" />) ou siga a convenção de nome " +
+                                "`arch-rules.*.yaml` no diretório do projeto. A camada foi ignorada; as demais regras " +
+                                "continuam valendo."));
+                        }
+
+                        break;
+                }
+            }
         }
 
         private static SchemaValidationError Issue(string code, string message)
@@ -530,19 +572,6 @@ namespace Arch.Analyzer
         private static bool IsRooted(string normalizedPath)
         {
             return normalizedPath.StartsWith("/", StringComparison.Ordinal) || HasDriveLetter(normalizedPath);
-        }
-
-        private static bool ContainsPath(List<string> paths, string path)
-        {
-            for (var i = 0; i < paths.Count; i++)
-            {
-                if (string.Equals(paths[i], path, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         /// <summary>
@@ -657,8 +686,9 @@ namespace Arch.Analyzer
 #pragma warning restore RS1013
 
         private static Diagnostic CreateEngineDiagnostic(
-            AdditionalText file,
-            SourceText sourceText,
+            CachedConfig cached,
+            AdditionalText mainFile,
+            SourceText mainText,
             SchemaValidationError error)
         {
             var descriptor = ArchDiagnostics.GetEngineDescriptorOrFallback(error.Code, error.IsBlocking);
@@ -669,10 +699,31 @@ namespace Arch.Analyzer
                 ? error.Message
                 : error.Code + ": " + error.Message;
 
-            return Diagnostic.Create(
-                descriptor,
-                CreateLocation(file, sourceText, error.Line, error.Column),
-                message);
+            string path;
+            SourceText text;
+            cached.ResolveSource(error.SourceDocumentIndex, mainFile, mainText, out path, out text);
+
+            return Diagnostic.Create(descriptor, CreateLocation(path, text, error.Line, error.Column), message);
+        }
+
+        /// <summary>
+        /// Diagnóstico de motor SOBRE UMA REGRA (ARCH9002/ARCH9003/ARCH9005): ancorado na linha da
+        /// regra no arquivo da cadeia que a declarou (issue #7); regra sem posição conhecida (montada
+        /// à mão, parser injetado) cai no início do arquivo principal.
+        /// </summary>
+        private static Diagnostic CreateRuleDiagnostic(
+            CachedConfig cached,
+            AdditionalText mainFile,
+            SourceText mainText,
+            RuleDefinition rule,
+            DiagnosticDescriptor descriptor,
+            string message)
+        {
+            string path;
+            SourceText text;
+            cached.ResolveSource(rule.SourceDocumentIndex, mainFile, mainText, out path, out text);
+
+            return Diagnostic.Create(descriptor, CreateLocation(path, text, rule.SourceLine, rule.SourceColumn), message);
         }
 
         private static Diagnostic CreateEngineDiagnostic(
@@ -681,15 +732,17 @@ namespace Arch.Analyzer
             DiagnosticDescriptor descriptor,
             string message)
         {
-            return Diagnostic.Create(descriptor, CreateLocation(file, sourceText, 0, 0), message);
+            return Diagnostic.Create(descriptor, CreateLocation(file.Path, sourceText, 0, 0), message);
         }
 
         /// <summary>
-        /// Localização dentro do próprio <c>arch-rules.yaml</c> — um erro de configuração precisa
-        /// abrir o arquivo de configuração, não um .cs qualquer (ADR-001 D4: "apontando
-        /// linha/coluna"). Linha/coluna inválidas ou ausentes caem para o início do arquivo.
+        /// Localização dentro do YAML (o <c>arch-rules.yaml</c> ou o arquivo da cadeia de `extends`
+        /// que produziu o problema) — um erro de configuração precisa abrir o arquivo de
+        /// configuração, não um .cs qualquer (ADR-001 D4: "apontando linha/coluna").
+        /// <paramref name="line"/>/<paramref name="column"/> são 1-based (convenção do parser);
+        /// inválidas ou ausentes (0) caem para o início do arquivo.
         /// </summary>
-        private static Location CreateLocation(AdditionalText file, SourceText sourceText, int line, int column)
+        private static Location CreateLocation(string path, SourceText sourceText, int line, int column)
         {
             var lines = sourceText.Lines;
             TextSpan span;
@@ -706,7 +759,7 @@ namespace Arch.Analyzer
                 span = TextSpan.FromBounds(start, textLine.End);
             }
 
-            return Location.Create(file.Path, span, sourceText.Lines.GetLinePositionSpan(span));
+            return Location.Create(path, span, sourceText.Lines.GetLinePositionSpan(span));
         }
 
         /// <summary>
@@ -724,6 +777,9 @@ namespace Arch.Analyzer
             /// <summary>Arquivos (caminho + instância de texto) que produziram esta config.</summary>
             private readonly IReadOnlyList<ChainFile> _chainFiles;
 
+            /// <summary>Arquivo de origem de cada texto passado ao parser, na mesma ordem.</summary>
+            private readonly IReadOnlyList<ChainFile> _sources;
+
             /// <summary>
             /// Caminhos de `extends` que NÃO tinham AdditionalFile na resolução. Se algum passar a
             /// existir, a entrada está obsoleta mesmo que todo texto da cadeia continue idêntico —
@@ -737,6 +793,7 @@ namespace Arch.Analyzer
                 Errors = errors ?? new SchemaValidationError[0];
                 _chainFiles = chain != null ? (IReadOnlyList<ChainFile>)chain.Files : new ChainFile[0];
                 _missingPaths = chain != null ? (IReadOnlyList<string>)chain.MissingPaths : new string[0];
+                _sources = chain != null ? (IReadOnlyList<ChainFile>)chain.Sources : new ChainFile[0];
 
                 for (var i = 0; i < Errors.Count; i++)
                 {
@@ -754,6 +811,28 @@ namespace Arch.Analyzer
                     null,
                     new[] { new SchemaValidationError("ARCH9001", message, 0, 0, true) },
                     chain);
+            }
+
+            /// <summary>
+            /// Caminho e texto do documento de índice <paramref name="documentIndex"/> na cadeia
+            /// passada ao parser; índice desconhecido (-1) ou fora da faixa devolve o principal.
+            /// </summary>
+            internal void ResolveSource(
+                int documentIndex,
+                AdditionalText mainFile,
+                SourceText mainText,
+                out string path,
+                out SourceText text)
+            {
+                if (documentIndex >= 0 && documentIndex < _sources.Count && _sources[documentIndex].Text != null)
+                {
+                    path = _sources[documentIndex].Path;
+                    text = _sources[documentIndex].Text;
+                    return;
+                }
+
+                path = mainFile.Path;
+                text = mainText;
             }
 
             internal bool IsStillValid(ImmutableArray<AdditionalText> additionalFiles, CancellationToken cancellationToken)
@@ -811,8 +890,8 @@ namespace Arch.Analyzer
         /// <summary>
         /// Estado mutável de uma resolução de cadeia: os textos já coletados em ordem de precedência,
         /// os arquivos que os produziram (para invalidar o cache), os caminhos de `extends` não
-        /// encontrados e os problemas (ARCH9006/ARCH9007) a reportar. <see cref="Stack"/> é o caminho
-        /// da raiz até o nó corrente — a base da detecção de ciclo.
+        /// encontrados e os problemas (ARCH9006/ARCH9007) a reportar. A travessia em si (pilha,
+        /// ciclo, limites) é de <see cref="ExtendsChainResolver"/>.
         /// </summary>
         private sealed class ChainResolution
         {
@@ -820,7 +899,13 @@ namespace Arch.Analyzer
             internal readonly List<ChainFile> Files = new List<ChainFile>();
             internal readonly List<string> MissingPaths = new List<string>();
             internal readonly List<SchemaValidationError> Issues = new List<SchemaValidationError>();
-            internal readonly List<string> Stack = new List<string>();
+
+            /// <summary>
+            /// Arquivo de origem de cada texto de <see cref="Texts"/>, NA MESMA ORDEM (índice i do
+            /// texto ↔ índice i aqui) — é o que permite ancorar um erro de schema no arquivo da
+            /// cadeia que o produziu, e não sempre no principal.
+            /// </summary>
+            internal readonly List<ChainFile> Sources = new List<ChainFile>();
 
             internal IReadOnlyList<SchemaValidationError> CombineIssuesWith(IReadOnlyList<SchemaValidationError> parseErrors)
             {

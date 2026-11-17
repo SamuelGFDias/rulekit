@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Arch.Analyzer.Contracts;
 using Arch.Config;
 using Microsoft.CodeAnalysis;
@@ -73,15 +74,16 @@ namespace Arch.Rules
                         return;
                     }
 
-                    // symbol.Locations[0] (não um loop sobre todas): para um tipo parcial,
+                    // A primeira localização (não um loop sobre todas): para um tipo parcial,
                     // Locations traz uma entrada por declaração sintática, mas o símbolo — e,
                     // portanto, a violação de convenção — é um só. Reportar em todas as
                     // localizações duplicaria o diagnóstico por arquivo/parte; a primeira
                     // localização (ordem de declaração no código-fonte) é suficiente e
-                    // determinística.
+                    // determinística. FirstOrDefault + Location.None é defesa contra uma lista
+                    // vazia (mesmo padrão de MaxDependenciesEvaluator, issue #7).
                     symbolContext.ReportDiagnostic(Diagnostic.Create(
                         slotDescriptor,
-                        symbol.Locations[0],
+                        symbol.Locations.FirstOrDefault() ?? Location.None,
                         BuildMessage(rule, symbol.Name, kind, value)));
                 },
                 SymbolKind.NamedType);

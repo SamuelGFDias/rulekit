@@ -19,7 +19,30 @@ namespace Arch.Cli
             return Run(args, Console.Out, Console.Error);
         }
 
+        /// <summary>Código impresso quando uma falha inesperada chega à rede de último recurso.</summary>
+        public const string UnexpectedFailureCode = "ARCH9001";
+
+        /// <summary>
+        /// Executa o comando. Rede de último recurso (issue #4): QUALQUER exceção que escape dos
+        /// comandos vira uma linha <c>ERRO [ARCH9001] ...</c> com tipo e mensagem — nunca um stack
+        /// trace bruto, ilegível em CI — e código de saída 1.
+        /// </summary>
         public static int Run(string[] args, TextWriter output, TextWriter error)
+        {
+            try
+            {
+                return RunCore(args, output, error);
+            }
+            catch (Exception ex)
+            {
+                output.WriteLine(
+                    $"ERRO [{UnexpectedFailureCode}] linha 0, coluna 0: Falha inesperada ao executar " +
+                    $"'arch-rules{(args.Length > 0 ? " " + args[0] : string.Empty)}' ({ex.GetType().Name}): {ex.Message}");
+                return 1;
+            }
+        }
+
+        private static int RunCore(string[] args, TextWriter output, TextWriter error)
         {
             if (args.Length == 0)
             {
