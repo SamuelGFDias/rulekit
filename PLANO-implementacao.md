@@ -1,5 +1,9 @@
 # Plano de implementação — motor de regras arquiteturais (.NET)
 
+> **Nota (2026-11-17):** o v1 deste plano foi concluído (fases 0–4). Este documento é mantido como
+> registro do plano original e **não** descreve o estado atual — para isso, veja o
+> [AGENTS.md](AGENTS.md) (seções 4, 6 e 8) e o [CHANGELOG.md](CHANGELOG.md).
+
 **Baseado em:** ADR-001
 **Modo de execução:** orquestração com subagents (skill `arquiteto`), fases paralelizadas
 **Regra de ouro:** o orquestrador não escreve código. Ele fixa contratos, delega, e valida o gate de

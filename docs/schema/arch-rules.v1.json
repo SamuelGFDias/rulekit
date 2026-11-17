@@ -1,31 +1,42 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/SamuelGFDias/rulekit/docs/schema/arch-rules.v1.json",
+  "$id": "https://raw.githubusercontent.com/SamuelGFDias/rulekit/main/docs/schema/arch-rules.v1.json",
   "title": "arch-rules.yaml (schema arch-rules/v1)",
-  "description": "Schema do arquivo de política arquitetural consumido pelo RuleKit (ADR-001, secao 4 D2). Cobre a sintaxe completa da versao MAJOR v1. Referencia cruzada NAO validada por este schema: 'defaults.severity' e 'rules[].severity' deveriam apontar para uma chave existente em 'severities', mas JSON Schema nao expressa 'esta string deve ser uma das chaves de outro objeto' — a validacao real dessa referencia acontece em runtime, no parser (Arch.Config), que reporta ARCH9001/ARCH9002 conforme o caso.",
+  "description": "Schema do arquivo de politica arquitetural consumido pelo RuleKit (ADR-001, secao 4 D2). Cobre a sintaxe completa da versao MAJOR v1. Uso em editores (YAML Language Server): '# yaml-language-server: $schema=https://raw.githubusercontent.com/SamuelGFDias/rulekit/main/docs/schema/arch-rules.v1.json' na primeira linha do arquivo. Este schema descreve a FORMA CANONICA (minusculas, sem espacos sobrando); o parser real e mais tolerante em pontos documentados abaixo (type e slot). Referencias cruzadas NAO validadas aqui, porque JSON Schema nao expressa 'esta string deve ser uma chave de outro objeto': 'defaults.severity' e 'rules[].severity' devem apontar para uma chave de 'severities' (validado por 'arch-rules validate'/'gen', erro CLI-SEVERITY) e 'from'/'to'/'layer' devem apontar para uma camada de 'layers'.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "layers", "rules"],
+  "required": [
+    "schema",
+    "layers",
+    "rules"
+  ],
   "properties": {
     "schema": {
       "const": "arch-rules/v1",
-      "description": "Versao do schema (ADR-001 D4). Obrigatoria. MAJOR incompativel gera ARCH9001 (error, arquivo inteiro invalidado); dentro da mesma MAJOR, MINOR e aditivo (campo ou 'type' de regra desconhecido gera ARCH9003, warning, e nao invalida as demais regras)."
+      "description": "Versao do schema (ADR-001 D4). Obrigatoria. MAJOR incompativel gera ARCH9001 (error, arquivo inteiro invalidado); dentro da mesma MAJOR, MINOR e aditivo no sentido de novos tipos de regra: um 'type' desconhecido gera ARCH9003 (warning, regra ignorada, as demais continuam valendo). Chave desconhecida no nivel raiz, em camada ou em 'defaults' e ARCH9001; chave que um tipo conhecido nao aceita e ARCH9008 (warning, regra ignorada)."
     },
     "extends": {
       "type": "array",
       "description": "Caminhos (relativos ao arquivo atual) de arquivos arch-rules.yaml a compor por merge. O arquivo que faz 'extends' vence no merge; 'layers' e 'rules' fazem merge por nome/id (ADR-001 D2).",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "layers": {
       "type": "object",
       "description": "Mapa nome-da-camada -> definicao. O nome da camada e livre (chave escolhida pelo consumidor, ex.: 'Controller', 'Service', 'Repository') e e referenciado por 'from'/'to'/'through'/'layer' em 'rules'.",
       "minProperties": 1,
-      "additionalProperties": { "$ref": "#/$defs/layerDefinition" }
+      "additionalProperties": {
+        "$ref": "#/$defs/layerDefinition"
+      }
     },
     "severities": {
       "type": "object",
       "description": "Mapa nome-livre-de-severidade -> nivel real do AnalyzerConfig (ADR-001 D3). As chaves sao escolhidas pelo consumidor (ex.: 'restrita', 'media', 'livre'); os valores sao restritos aos 5 niveis que 'dotnet_diagnostic.<ID>.severity' aceita. 'info' e 'hidden' (do enum DiagnosticSeverity) NUNCA sao valores validos aqui — o mapeamento canonico e suggestion=Info, silent=Hidden.",
-      "additionalProperties": { "$ref": "#/$defs/severityLevel" }
+      "additionalProperties": {
+        "$ref": "#/$defs/severityLevel"
+      }
     },
     "defaults": {
       "type": "object",
@@ -41,7 +52,9 @@
     "rules": {
       "type": "array",
       "description": "Lista de regras arquiteturais. Cada regra mapeia um id de negocio a um slot tecnico pre-declarado (ADR-001 secao 2/3, pool de 512 descriptors ARCH0001..ARCH0512).",
-      "items": { "$ref": "#/$defs/rule" }
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
     }
   },
   "$defs": {
@@ -72,45 +85,86 @@
         }
       },
       "oneOf": [
-        { "required": ["namespace"] },
-        { "required": ["nameSuffix"] },
-        { "required": ["baseType"] },
-        { "required": ["implements"] },
-        { "required": ["attribute"] }
+        {
+          "required": [
+            "namespace"
+          ]
+        },
+        {
+          "required": [
+            "nameSuffix"
+          ]
+        },
+        {
+          "required": [
+            "baseType"
+          ]
+        },
+        {
+          "required": [
+            "implements"
+          ]
+        },
+        {
+          "required": [
+            "attribute"
+          ]
+        }
       ]
     },
     "layerDefinition": {
       "type": "object",
       "description": "Definicao de uma camada: um ou mais criterios de inclusao (match, combinados por OR) e, opcionalmente, criterios de exclusao (exclude, tambem combinados por OR, aplicados depois do match).",
       "additionalProperties": false,
-      "required": ["match"],
+      "required": [
+        "match"
+      ],
       "properties": {
         "match": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/matchCriterion" }
+          "items": {
+            "$ref": "#/$defs/matchCriterion"
+          }
         },
         "exclude": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/matchCriterion" }
+          "items": {
+            "$ref": "#/$defs/matchCriterion"
+          }
         }
       }
     },
     "severityLevel": {
       "type": "string",
       "description": "Nivel aceito por 'dotnet_diagnostic.<ID>.severity' no AnalyzerConfig gerado (ADR-001 D3). 'suggestion' mapeia para DiagnosticSeverity.Info e 'silent' para DiagnosticSeverity.Hidden; 'none' suprime o diagnostico. Os literais 'info'/'hidden' do enum DiagnosticSeverity nunca sao usados aqui de proposito.",
-      "enum": ["error", "warning", "suggestion", "silent", "none"]
+      "enum": [
+        "error",
+        "warning",
+        "suggestion",
+        "silent",
+        "none"
+      ]
     },
     "ruleTypeKnown": {
       "type": "string",
-      "enum": ["forbidden-call", "must-route-through", "naming-convention", "max-dependencies"],
-      "description": "Os 4 tipos de regra implementados por Arch.Rules na Fase 2 (RuleEvaluatorRegistry.Default)."
+      "enum": [
+        "forbidden-call",
+        "must-route-through",
+        "naming-convention",
+        "max-dependencies"
+      ],
+      "description": "Os 4 tipos de regra de v1, definidos em RuleTypeCatalog.Default (Arch.Config) e despachados por RuleEvaluatorRegistry.Default (Arch.Analyzer)."
     },
     "rule": {
       "type": "object",
-      "description": "Uma regra arquitetural. O par id/slot e a chave de todo o mecanismo de diagnostico (ADR-001 secao 2/3): 'id' e a identidade de negocio (aparece na mensagem e em Diagnostic.Properties), 'slot' e a identidade tecnica pre-declarada que o compilador, o .editorconfig/.globalconfig e '#pragma' realmente enxergam.",
-      "required": ["id", "slot", "type"],
+      "description": "Uma regra arquitetural. O par id/slot e a chave de todo o mecanismo de diagnostico (ADR-001 secao 2/3): 'id' e a identidade de negocio (aparece na mensagem e em Diagnostic.Properties), 'slot' e a identidade tecnica pre-declarada que o compilador, o .editorconfig/.globalconfig e '#pragma' realmente enxergam. Para os 4 tipos conhecidos (forma canonica), 'required' e 'propertyNames' espelham RuleTypeCatalog: campo obrigatorio ausente ou chave que o tipo nao aceita e o que o parser reporta como ARCH9008.",
+      "required": [
+        "id",
+        "slot",
+        "type"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -119,13 +173,20 @@
         },
         "slot": {
           "type": "string",
-          "pattern": "^ARCH0[0-4][0-9]{2}$|^ARCH050[0-9]$|^ARCH051[0-2]$",
-          "description": "Descriptor tecnico pre-declarado ao qual esta regra e mapeada, no intervalo ARCH0001..ARCH0512 (pool de slots, ADR-001 secao 2/3 Opcao C). Fora do intervalo ou duplicado entre regras gera ARCH9002 (warning, regra ignorada). A faixa ARCH9xxx e reservada ao motor e nunca deve ser usada aqui."
+          "pattern": "^ARCH(000[1-9]|00[1-9][0-9]|0[1-4][0-9]{2}|050[0-9]|051[0-2])$",
+          "description": "Descriptor tecnico pre-declarado ao qual esta regra e mapeada, ARCH0001..ARCH0512 (pool de slots, ADR-001 secao 2/3 Opcao C). Fora do intervalo ou duplicado entre regras gera ARCH9002 (warning, regra ignorada; 'arch-rules gen'/'validate' recusam). A faixa ARCH9xxx e reservada ao motor. O parser tambem aceita ' arch0007 ' (trim, sem diferenciar caixa) e o normaliza; este schema documenta a forma canonica."
         },
         "type": {
-          "description": "Tipo de regra, roteado para um IRuleEvaluator via RuleEvaluatorRegistry (AGENTS.md secao 8). Este schema NAO restringe 'type' a um enum fechado: e proposital deixar qualquer string passar aqui, porque D4 do ADR trata novos 'type' como extensao MINOR aditiva — um tipo desconhecido para a versao instalada da lib gera apenas ARCH9003 (warning, regra ignorada, as demais continuam valendo), nunca um erro de schema bloqueante. Travar o autocomplete a um enum fechado neste arquivo quebraria esse contrato de compatibilidade a cada novo tipo lancado. Os 4 tipos abaixo sao os unicos implementados hoje (Fase 2); os campos 'Extra' especificos de cada um so sao exigidos quando 'type' bate com um destes.",
-          "type": "string",
-          "minLength": 1
+          "description": "Tipo de regra. Os 4 tipos de v1 (RuleTypeCatalog em Arch.Config) sao 'forbidden-call', 'must-route-through', 'naming-convention' e 'max-dependencies'; o editor sugere esses valores, mas qualquer string nao vazia e aceita aqui de proposito: ADR-001 D4 trata novos 'type' como extensao MINOR aditiva — um tipo desconhecido para a versao instalada gera apenas ARCH9003 (warning, regra ignorada, as demais continuam valendo), nunca erro de schema bloqueante. O analyzer e o parser comparam 'type' ignorando caixa e espacos nas pontas (' Forbidden-Call ' vale 'forbidden-call'); este schema documenta a forma canonica (minusculas) e as restricoes de campos por tipo (abaixo) so valem para ela. Uma regra de tipo conhecido com campo obrigatorio ausente, chave que o tipo nao aceita ou valor invalido gera ARCH9008 (warning, regra ignorada).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ruleTypeKnown"
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ]
         },
         "enabled": {
           "type": "boolean",
@@ -134,22 +195,22 @@
         },
         "severity": {
           "type": "string",
-          "description": "Deveria ser uma chave existente em 'severities' (ou usar 'defaults.severity' quando omitido) — referencia cruzada NAO validada por este JSON Schema; validada em runtime pelo parser."
+          "description": "Nome de uma chave de 'severities' (ou 'defaults.severity' quando omitido). Referencia cruzada NAO validada por este JSON Schema; 'arch-rules validate'/'gen' falham (CLI-SEVERITY) se o nome nao existir ou o valor mapeado for invalido. A severidade efetiva em compilacao vive no .globalconfig gerado, nao no YAML."
         },
         "message": {
           "type": "string",
           "minLength": 1,
-          "description": "Template de mensagem com placeholders expandidos a partir de 'Extra' (ex.: '{from}', '{to}', '{symbol}', e para must-route-through tambem '{through}'). Quando omitido, cada avaliador usa seu DefaultMessageTemplate."
+          "description": "Template de mensagem. Placeholders: '{from}', '{to}', '{symbol}', '{id}' e qualquer campo da propria regra, em texto ('{through}', '{layer}', '{max}', '{countBy}'; sensivel a caixa, como a chave do YAML). So 'forbidden-call' e 'must-route-through' usam o template (padrao: DefaultMessageTemplate de cada um); 'naming-convention' e 'max-dependencies' emitem mensagem fixa e ignoram este campo."
         },
         "help": {
           "type": "string",
           "minLength": 1,
-          "description": "URL (ou referencia) de ajuda para a regra, exposta em Diagnostic.Properties['archHelp']."
+          "description": "URL (ou referencia) de ajuda da regra, exposta em Diagnostic.Properties['archHelp']."
         },
         "from": {
           "type": "string",
           "minLength": 1,
-          "description": "Nome de uma camada declarada em 'layers'. Usado por forbidden-call e must-route-through: nenhum tipo desta camada pode alcancar (invocacao, criacao de objeto, leitura de propriedade ou campo) diretamente um tipo da camada 'to'."
+          "description": "Nome de uma camada declarada em 'layers'. Usado por forbidden-call e must-route-through (OBRIGATORIO): nenhum tipo desta camada pode alcancar diretamente (invocacao, criacao de objeto, leitura de propriedade ou campo) um tipo da camada 'to'."
         },
         "to": {
           "type": "string",
@@ -157,54 +218,188 @@
           "description": "Nome de uma camada declarada em 'layers'. Ver 'from'."
         },
         "through": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "type": "string", "minLength": 1 },
-          "description": "Usado por must-route-through: lista de camadas intermediarias esperadas, apenas para compor a mensagem (ex.: '{through}') — nao e verificado o caminho real A->B->C (ADR-001 D2, 'Nota sobre must-route-through'); a deteccao efetiva e identica a forbidden-call sobre 'from'/'to'."
+          "description": "Usado por must-route-through (OPCIONAL): camada(s) intermediaria(s) esperada(s), apenas para compor a mensagem ('{through}', itens separados por virgula) — o caminho real from -> through -> to NAO e verificado (ADR-001 D2); a deteccao e identica a forbidden-call sobre 'from'/'to'. Aceita lista ou, por tolerancia do parser, um escalar solto (lista de um item).",
+          "anyOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ]
         },
         "layer": {
           "type": "string",
           "minLength": 1,
-          "description": "Nome de uma camada declarada em 'layers'. Usado por naming-convention (camada cujos tipos devem obedecer a convencao de nome) e max-dependencies (camada cujos tipos tem o limite de dependencias verificado)."
+          "description": "Nome de uma camada declarada em 'layers'. Usado por naming-convention e max-dependencies (OBRIGATORIOS nesses tipos)."
         },
         "require": {
           "type": "object",
-          "description": "Usado por naming-convention: convencao de nome exigida para tipos da camada 'layer'. Documentado no ADR e no XML doc de NamingConventionEvaluator apenas com 'suffix'; o avaliador tambem aceita 'prefix' com o mesmo formato (suporte antecipado, nao exigido pelo ADR nesta fase). Exatamente uma chave.",
+          "description": "Usado por naming-convention (OBRIGATORIO): convencao de nome exigida para tipos da camada 'layer'. Exatamente um par, e a chave so pode ser 'suffix' ou 'prefix'. O parser tambem aceita a forma escalar legada 'suffix=Repository'; este schema exige a forma canonica de mapeamento.",
           "additionalProperties": false,
           "minProperties": 1,
           "maxProperties": 1,
           "properties": {
-            "suffix": { "type": "string", "minLength": 1, "description": "Sufixo obrigatorio do nome do tipo, ex.: 'Repository'." },
-            "prefix": { "type": "string", "minLength": 1, "description": "Prefixo obrigatorio do nome do tipo, ex.: 'I'. Suporte antecipado do avaliador, nao documentado no ADR." }
+            "suffix": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Sufixo obrigatorio do nome do tipo, ex.: 'Repository'."
+            },
+            "prefix": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Prefixo obrigatorio do nome do tipo, ex.: 'I'."
+            }
           }
         },
         "max": {
           "type": "integer",
           "minimum": 0,
-          "description": "Usado por max-dependencies: numero maximo de dependencias distintas permitido (limite inclusivo — contagem igual a 'max' nao reporta)."
+          "description": "Usado por max-dependencies (OBRIGATORIO): numero maximo de dependencias distintas por tipo da camada 'layer'; inteiro >= 0 (limite inclusivo — contagem igual a 'max' nao reporta)."
         },
         "countBy": {
           "type": "string",
-          "enum": ["constructor-parameters", "fields", "all"],
-          "description": "Usado por max-dependencies: como contar dependencias — pelo maior construtor publico ('constructor-parameters'), por campos de instancia privados/protegidos declarados diretamente no tipo e nao primitivos ('fields'), ou pela uniao dos tipos distintos das duas contagens ('all'). Contagem e por TIPO distinto, nao por ocorrencia."
+          "enum": [
+            "constructor-parameters",
+            "fields",
+            "all"
+          ],
+          "description": "Usado por max-dependencies (OBRIGATORIO): como contar — 'constructor-parameters' (tipos distintos dos parametros do maior construtor publico), 'fields' (tipos distintos de campos de instancia privados/protegidos declarados no tipo, nao primitivos) ou 'all' (uniao das duas contagens). Contagem por TIPO distinto, nao por ocorrencia."
         }
       },
       "allOf": [
         {
-          "if": { "properties": { "type": { "const": "forbidden-call" } }, "required": ["type"] },
-          "then": { "required": ["from", "to"] }
+          "if": {
+            "properties": {
+              "type": {
+                "const": "forbidden-call"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "from",
+              "to"
+            ],
+            "propertyNames": {
+              "enum": [
+                "id",
+                "slot",
+                "type",
+                "enabled",
+                "severity",
+                "message",
+                "help",
+                "from",
+                "to"
+              ]
+            }
+          }
         },
         {
-          "if": { "properties": { "type": { "const": "must-route-through" } }, "required": ["type"] },
-          "then": { "required": ["from", "to", "through"] }
+          "if": {
+            "properties": {
+              "type": {
+                "const": "must-route-through"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "from",
+              "to"
+            ],
+            "propertyNames": {
+              "enum": [
+                "id",
+                "slot",
+                "type",
+                "enabled",
+                "severity",
+                "message",
+                "help",
+                "from",
+                "to",
+                "through"
+              ]
+            }
+          }
         },
         {
-          "if": { "properties": { "type": { "const": "naming-convention" } }, "required": ["type"] },
-          "then": { "required": ["layer", "require"] }
+          "if": {
+            "properties": {
+              "type": {
+                "const": "naming-convention"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "layer",
+              "require"
+            ],
+            "propertyNames": {
+              "enum": [
+                "id",
+                "slot",
+                "type",
+                "enabled",
+                "severity",
+                "message",
+                "help",
+                "layer",
+                "require"
+              ]
+            }
+          }
         },
         {
-          "if": { "properties": { "type": { "const": "max-dependencies" } }, "required": ["type"] },
-          "then": { "required": ["layer", "max", "countBy"] }
+          "if": {
+            "properties": {
+              "type": {
+                "const": "max-dependencies"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "layer",
+              "max",
+              "countBy"
+            ],
+            "propertyNames": {
+              "enum": [
+                "id",
+                "slot",
+                "type",
+                "enabled",
+                "severity",
+                "message",
+                "help",
+                "layer",
+                "max",
+                "countBy"
+              ]
+            }
+          }
         }
       ]
     }

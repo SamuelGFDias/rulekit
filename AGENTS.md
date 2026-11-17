@@ -2,15 +2,17 @@
 
 Contexto de referência rápida para qualquer agente que trabalhe neste repositório. Leia isto antes
 de pedir para reler o ADR ou o Plano inteiros; volte às fontes completas só quando precisar de
-detalhe que não esteja aqui.
+detalhe que não esteja aqui. Para uso da lib, veja o `README.md`; para compilar/testar/publicar, o
+`CONTRIBUTING.md`; o que cada versão entrega, o `CHANGELOG.md`.
 
 ## 1. Visão geral
 
 RuleKit é uma lib .NET distribuída como Roslyn Analyzer configurável que valida padrões
 arquiteturais em tempo de compilação. A lib não embute nenhuma regra de negócio: cada organização
 declara sua própria política num arquivo YAML externo (`arch-rules.yaml`) e recebe diagnósticos de
-violação no `dotnet build`, no CI e ao vivo no Error List da IDE — sem fork da lib e sem regra
-hardcoded por empresa.
+violação no `dotnet build`, no CI e (a verificar — ver §6) ao vivo no Error List da IDE — sem fork
+da lib e sem regra hardcoded por empresa. Dois pacotes NuGet: `RuleKit.Analyzer` e `RuleKit.Cli`
+(comando `arch-rules`).
 
 ## 2. Decisão arquitetural central: pool de slots
 
@@ -34,10 +36,12 @@ de negócio da organização a um desses slots técnicos:
 ```
 
 Isso dá override de severidade por regra individual (`dotnet_diagnostic.ARCH0007.severity = ...`),
-funciona em live analysis na IDE sem build, e permite `#pragma warning disable ARCH0007`. O custo
-aceito é que o slot é um "número mágico" no YAML — mitigado por um gerador CLI (`arch-rules gen`,
-Fase 3) que aloca slots e emite lock file. Opções alternativas descartadas: descriptors construídos
-em runtime (inviável — vira sempre `AD0001`) e um descriptor fixo por *tipo* de regra (mata
+e permite `#pragma warning disable ARCH0007`. Como os descriptors são conhecidos sem build, a
+intenção é que isso funcione também em live analysis na IDE — **ainda não verificado** (ver §6). O custo aceito é que o
+slot é um "número mágico" no YAML — mitigado pelo CLI (`arch-rules validate`/`gen`), que **valida**
+slots únicos dentro do pool e emite o `.globalconfig` e o lock file. **O CLI não aloca slots**: quem
+escolhe o slot é o autor do YAML. Opções alternativas descartadas: descriptors construídos em
+runtime (inviável — vira sempre `AD0001`) e um descriptor fixo por *tipo* de regra (mata
 granularidade de override por regra). Uma MSBuild task que aloca slots automaticamente (Opção D) foi
 **adiada para v2**, não rejeitada — v1 prioriza feedback ao vivo na IDE sobre ergonomia de alocação.
 
@@ -52,153 +56,115 @@ granularidade de override por regra). Uma MSBuild task que aloca slots automatic
 
 Detalhes completos, exemplos de YAML e trade-offs: `ADR-001-motor-regras-arquiteturais.md`.
 
-## 4. Estrutura de pastas (real, pós-Fase 4 — v1 fechado)
-
-A árvore abaixo reflete o `RuleKit.sln` de fato após a Fase 0 (spike), a Fase 1 (fundações), a
-Fase 2 (tipos de regra), a Fase 3 (ergonomia — CLI e documentação) e a Fase 4 (verificação —
-dogfooding, revisão adversarial, performance).
+## 4. Estrutura de pastas (real, v0.1.0)
 
 ```
 src/
-  Arch.Analyzer/                 # REAL — netstandard2.0. DiagnosticAnalyzer + pool de 512
-                                  # descriptors (ARCH0001..ARCH0512) + faixa ARCH9xxx,
-                                  # ILayerResolver real (LayerResolver.cs, NamespaceTrie.cs), cache
-                                  # de ArchConfig por SourceText, RuleEvaluatorRegistry populado com
-                                  # os 4 avaliadores reais da Fase 2. Referencia
-                                  # Arch.Analyzer.Contracts E Arch.Rules.
-  Arch.Analyzer.Contracts/       # REAL — netstandard2.0, extraído nesta integração (Fase 2).
-                                  # `IRuleEvaluator`/`ILayerResolver` (antes viviam dentro de
-                                  # Arch.Analyzer). Referencia só Arch.Config +
-                                  # Microsoft.CodeAnalysis.CSharp — projeto próprio para evitar
-                                  # ciclo entre Arch.Analyzer e Arch.Rules (ver seção 8).
-  Arch.Config/                   # REAL — netstandard2.0, sem dependência de Roslyn. Modelo
-                                  # (ArchConfig/LayerDefinition/LayerMatchCriterion/
-                                  # RuleDefinition) + ArchConfigParser (YamlDotNet, em
-                                  # Internal/) + validação de schema
-  Arch.Rules/                    # REAL — Fase 2, um IRuleEvaluator por arquivo (4 arquivos):
-                                  # ForbiddenCallEvaluator.cs, MustRouteThroughEvaluator.cs (herda
-                                  # do anterior — açúcar sintático), NamingConventionEvaluator.cs,
-                                  # MaxDependenciesEvaluator.cs. Referencia só
-                                  # Arch.Analyzer.Contracts + Arch.Config, NÃO Arch.Analyzer.
-  Arch.Cli/                      # REAL — Fase 3, net10.0, OutputType=Exe, PackAsTool=true,
-                                  # ToolCommandName=arch-rules. Comandos: `arch-rules gen <yaml>
-                                  # [--out <dir>]` (resolve extends do disco, valida schema e slots
-                                  # únicos dentro do pool ARCH0001-0512, gera .globalconfig com
-                                  # dotnet_diagnostic.<slot>.severity = <valor> e
-                                  # arch-rules.lock.yaml com o retrato id→slot→severidade→enabled) e
-                                  # `arch-rules validate <yaml>` (mesma validação, sem gerar
-                                  # arquivo, para uso em CI). Arquivos: Program.cs,
-                                  # ConfigPipeline.cs, GenCommand.cs, ValidateCommand.cs,
-                                  # ExtendsResolver.cs, SlotValidator.cs, SeverityResolver.cs,
-                                  # GlobalConfigWriter.cs, LockFileWriter.cs, CliDiagnostic.cs.
+  Arch.Analyzer/                 # netstandard2.0 — PackageId RuleKit.Analyzer (assembly/namespaces
+                                  # continuam Arch.Analyzer). ArchRulesAnalyzer, pool de 512 descriptors
+                                  # (ARCH0001..ARCH0512) + faixa ARCH9xxx (ArchDiagnostics),
+                                  # LayerResolver/NamespaceTrie, RuleEvaluatorRegistry (despacho),
+                                  # SeverityDivergence (ARCH9005). EnforceExtendedAnalyzerRules ligado
+                                  # (RS1035: sem I/O).
+  Arch.Analyzer.Contracts/       # netstandard2.0 — IRuleEvaluator/ILayerResolver. Projeto próprio para
+                                  # evitar ciclo Arch.Analyzer <-> Arch.Rules (ver seção 8).
+  Arch.Config/                   # netstandard2.0, sem Roslyn — modelo (ArchConfig/LayerDefinition/
+                                  # LayerMatchCriterion/RuleDefinition/RulePropertyValue),
+                                  # ArchConfigParser (YamlDotNet, em Internal/), RuleTypeCatalog,
+                                  # SlotPool, SeverityVocabulary, ExtendsChainResolver.
+  Arch.Rules/                    # netstandard2.0 — um IRuleEvaluator por arquivo: ForbiddenCall,
+                                  # MustRouteThrough (herda do anterior), NamingConvention,
+                                  # MaxDependencies. Referencia só Contracts + Config.
+  Arch.Cli/                      # net10.0, PackAsTool — PackageId RuleKit.Cli, comando arch-rules,
+                                  # RollForward=Major (só rola para runtimes MAIS NOVOS: exige .NET 10+).
+                                  # `gen <yaml> [--out <dir>]` e `validate <yaml>`: resolvem extends do
+                                  # disco (ExtendsResolver = loader de disco sobre ExtendsChainResolver),
+                                  # validam schema/slots/severidades e `gen` escreve .globalconfig e
+                                  # arch-rules.lock.yaml. Sem dependência direta de YamlDotNet.
 tests/
-  Arch.Config.Tests/             # parser puro, sem Roslyn — 9 testes
-  Arch.Analyzer.Tests/           # harness (código + config) -> diagnósticos — 53 testes
-  Arch.Rules.Tests/              # REAL — Fase 2, testes dos 4 avaliadores — 30 testes
-  Arch.Cli.Tests/                # REAL — Fase 3, testes do CLI (gen/validate) — 8 testes
-  Arch.TestHarness/              # harness reutilizável de compilação in-memory — 2 testes próprios,
-                                  # consumido também por Arch.Analyzer.Tests
-  Arch.Benchmarks/                # REAL — Fase 4, benchmarks de performance de fato
-                                  # (ConfigCacheBenchmarks.cs, LayerResolverMemoizationBenchmarks.cs):
-                                  # confirmam que a memoização do LayerResolver é ~23x mais rápida e
-                                  # aloca ~1750x menos que classificar símbolos sem cache, e que o
-                                  # cache de config elimina o reparsing do YAML.
-  Arch.Dogfood/                   # REAL — Fase 4 (trilha 4A). `Arch.Dogfood.Sample/` consome o
-                                  # analyzer via `.nupkg` real (não ProjectReference) — 19 arquivos-
-                                  # fonte, 5 camadas, os 4 tipos de regra — para validar o pacote de
-                                  # ponta a ponta como um consumidor externo veria.
-  Arch.Spike.Consumer/            # artefato do spike da Fase 0 — projeto de prova de conceito que
-                                  # CONSOME o analyzer via PackageReference; não faz parte da lib
-                                  # final, não entra no pack
-  Arch.Spike.ControlAnalyzer/    # artefato do spike da Fase 0 — analyzer de controle para comparação;
-                                  # idem, não faz parte da lib final
+  Arch.Config.Tests/             # parser + catálogo, sem Roslyn — 72 testes
+  Arch.Analyzer.Tests/           # harness (código + config) -> diagnósticos — 80 testes
+  Arch.Rules.Tests/              # testes dos 4 avaliadores — 32 testes
+  Arch.Cli.Tests/                # testes do CLI (gen/validate) — 27 testes
+  Arch.TestHarness/              # compilação in-memory reutilizável — 4 testes próprios
+  Arch.Benchmarks/               # BenchmarkDotNet (memoização do LayerResolver, cache de config); só compila no CI
+  Arch.Dogfood/                  # Arch.Dogfood.Sample consome o analyzer por .nupkg real (não
+                                  # ProjectReference) — fora da RuleKit.sln; versão por
+                                  # -p:RuleKitAnalyzerVersion
 build/
-  ilrepack.targets               # REAL — Fase 4 corrigiu o timing crítico: funde as 5 dependências
-                                  # (Arch.Analyzer + YamlDotNet + Arch.Config +
-                                  # Arch.Analyzer.Contracts + Arch.Rules) com /internalize, e roda
-                                  # SÓ durante `dotnet pack` (hook BeforeTargets="_GetPackageFiles"),
-                                  # nunca num `dotnet build` comum — assim projetos que referenciam
-                                  # Arch.Analyzer via ProjectReference (testes, benchmarks) nunca
-                                  # veem o assembly fundido/internalizado, o que antes causava
-                                  # colisão de tipos CS0433.
-  Arch.Analyzer.targets           # REAL — Fase 4, empacotado em `build/` no .nupkg. Adiciona
-                                  # `arch-rules.yaml` e `arch-rules.*.yaml` a @(AdditionalFiles)
-                                  # automaticamente em qualquer projeto que instale o pacote — sem
-                                  # isso, instalar o pacote e criar o YAML não bastava (o analyzer
-                                  # saía pela porta rápida silenciosamente, sem diagnóstico).
-.github/
-  workflows/ci.yml               # CI: build+test+pack+smoke (jobs build-and-test, pack-and-smoke).
-                                  # Validação em host .NET Framework/Visual Studio fica FORA do
-                                  # pipeline — ver issue #1 no GitHub
-docs/
-  adr/ADR-001-....md
-  schema/arch-rules.v1.json      # REAL — Fase 3, JSON Schema completo (draft 2020-12) do
-                                  # arch-rules.yaml v1, validado contra o exemplo do ADR-001 D2 e
-                                  # contra os 4 tipos de regra reais
+  ilrepack.targets               # funde as 5 DLLs (Arch.Analyzer + YamlDotNet + Arch.Config +
+                                  # Arch.Analyzer.Contracts + Arch.Rules) com /internalize, SÓ durante
+                                  # `dotnet pack` (BeforeTargets="_GetPackageFiles"), nunca num build
+                                  # comum — projetos que usam ProjectReference nunca veem o assembly
+                                  # internalizado (evita CS0433).
+  RuleKit.Analyzer.targets       # empacotado em build/ no .nupkg (nome PRECISA ser build/<PackageId>.targets).
+                                  # Adiciona arch-rules.yaml e arch-rules.*.yaml (exceto o .lock.yaml)
+                                  # a @(AdditionalFiles) em todo projeto que instale o pacote.
+eng/perf/                        # solução sintética de referência (generate.sh) e medição do orçamento
+                                  # de < 5% de overhead (measure.sh); metodologia em eng/perf/README.md
+docs/schema/arch-rules.v1.json   # JSON Schema (draft 2020-12), $id resolvível em raw.githubusercontent.com,
+                                  # alinhado ao RuleTypeCatalog
+.github/workflows/
+  ci.yml                         # jobs: build-test (build, `dotnet test`, pack), smoke (dogfood contra o
+                                  # .nupkg + dotnet tool), windows-vs (MSBuild/csc .NET Framework do
+                                  # Visual Studio, RoslynCompilerType=Framework; falha se não provar o
+                                  # host ou se aparecer AD0001), perf (gate de 5%, mediana de pares)
+  publish.yml                    # tag v* -> build/test/pack -> nuget.org (Trusted Publishing) -> Release
+Directory.Build.props            # metadados de pacote, MinVer (tag prefix `v`), SourceLink — comuns a todos
+Directory.Packages.props         # Central Package Management: versões SÓ aqui (Roslyn 4.8.0,
+                                  # YamlDotNet 13.1.0, MinVer 8.0.0, ILRepack.Lib.MSBuild.Task 2.0.46)
+global.json                      # SDK 10.0.100, rollForward latestFeature
+README.md                        # orientado a consumidor; é o PackageReadmeFile dos dois pacotes
+CONTRIBUTING.md / CHANGELOG.md   # desenvolvimento / histórico de versões
+ADR-001-...md / PLANO-implementacao.md   # decisão de arquitetura / plano original (v1 concluído)
 ```
 
-`Arch.Config` e `Arch.Rules` são fundidos em `Arch.Analyzer.dll` no pack — a separação existe para
-testabilidade e paralelização entre trilhas, não para distribuição.
+`Arch.Config`, `Arch.Rules` e `Arch.Analyzer.Contracts` são fundidos em `Arch.Analyzer.dll` no pack —
+a separação existe para testabilidade e para evitar ciclos, não para distribuição. O `README.md` é
+empacotado nos dois `.nupkg`: **só URLs absolutas** (links relativos quebram no nuget.org).
 
 ## 5. Convenções técnicas
 
 - **Target frameworks:** `netstandard2.0` para as libs do analyzer (`Arch.Analyzer`, `Arch.Config`,
-  `Arch.Rules` — precisam rodar dentro do host do compilador). `net10.0` para `Arch.Cli` (ferramenta
-  externa, sem essa restrição).
+  `Arch.Rules`, `Arch.Analyzer.Contracts` — precisam rodar dentro do host do compilador). `net10.0`
+  para `Arch.Cli` (ferramenta externa, sem essa restrição) e para os testes. Roslyn fixado em 4.8.0
+  (menor versão suportada: SDK .NET 8+ / VS 2022 17.8+).
+- **Versão dos pacotes:** MinVer a partir de tags `vX.Y.Z`; nunca fixar `<Version>` num csproj.
 - **Parser YAML:** YamlDotNet, fundido no assembly do analyzer via ILRepack `/internalize`, virando
   tipos `internal`. **Nunca distribuído como DLL separada em `analyzers/dotnet/cs`** — isso é o que
   elimina a classe de falhas do roslyn#41421 (`FileLoadException` quando dois analyzers carregam
   versões diferentes do mesmo assembly).
-- **Faixa `ARCH9xxx`** é reservada para erros do próprio motor (schema inválido, camada inexistente
-  referenciada, tipo não resolvido, slot duplicado) — sempre habilitada por padrão, **nunca alocável
-  por configuração** do consumidor. Não recebe `WellKnownDiagnosticTags.NotConfigurable` (essa tag
-  bloquearia `#pragma`/`.editorconfig`, e o time precisa poder silenciar pontualmente um aviso do
-  motor).
+- **Faixa `ARCH9xxx`** é reservada para erros do próprio motor — sempre habilitada por padrão,
+  **nunca alocável por configuração** do consumidor. Não recebe `WellKnownDiagnosticTags.NotConfigurable`
+  (essa tag bloquearia `#pragma`/`.editorconfig`, e o time precisa poder silenciar pontualmente um
+  aviso do motor).
 - YAML aceito é um subset restrito: sem anchors/aliases, sem multi-documento, sem tags customizadas;
   chave desconhecida é erro de schema, não silêncio.
+- O analyzer não faz I/O (RS1035): tudo que lê vem de `AdditionalFiles`.
 
 ## 6. Estado atual do projeto
 
-**Fases 0-4 concluídas — v1 completo do PLANO-implementacao.md fechado.** Gate final: **109 testes
-aprovados** (`Arch.Config.Tests` 9 + `Arch.Analyzer.Tests` 60 + `Arch.Rules.Tests` 30 +
-`Arch.Cli.Tests` 8 + `Arch.TestHarness` 2), 0 falhas.
+**v0.1.0 pronto para publicação.** Fases 0–4 do `PLANO-implementacao.md` concluídas e o ciclo de
+preparação para o nuget.org fechado (pacotes renomeados, catálogo de tipos, `ARCH9005`/`ARCH9008`
+reais, resolvedor único de `extends`, CI com Windows/VS e perf, publicação por Trusted Publishing,
+README/CHANGELOG/CONTRIBUTING). O que falta é só o ato de release (seção 10): tag `v0.1.0` num commit
+da `main`.
 
-Dois defeitos críticos encontrados pela revisão adversarial da Fase 4 e corrigidos antes de fechar
-o v1:
-- (a) o pacote não incluía `build/*.targets` para registrar `arch-rules.yaml` automaticamente —
-  corrigido com `build/Arch.Analyzer.targets` (ver seção 4);
-- (b) o analyzer não resolvia `extends:` (só o CLI resolvia) — corrigido, com a convenção de nome
-  `arch-rules.*.yaml` para resolução automática via `AdditionalFiles` (ver seção 8).
+Gate verificado (`dotnet test RuleKit.sln -c Release`): **215 testes aprovados, 0 falhas** —
+`Arch.Config.Tests` 72 + `Arch.Analyzer.Tests` 80 + `Arch.Rules.Tests` 32 + `Arch.Cli.Tests` 27 +
+`Arch.TestHarness` 4.
 
-Pendência conhecida remanescente: validação em host .NET Framework/Visual Studio — rastreada na
-issue https://github.com/SamuelGFDias/rulekit/issues/1; não foi possível verificar em nenhuma fase
-neste ambiente Linux.
+Pendências conhecidas (não bloqueiam a v0.1.0):
+- **#1** — live analysis do Visual Studio (Error List durante a digitação) não verificada. O build no
+  host .NET Framework do VS já é provado a cada push (job `windows-vs`).
+- **#20** (v2) — erros do motor saem em `RegisterCompilationEndAction`, que pode não rodar na live
+  analysis padrão; proposta: `RegisterAdditionalFileAction`.
+- **#21** (v2) — sem extensão de terceiros: `RuleEvaluatorRegistry` é `internal` e Contracts/Rules são
+  internalizados no pack.
+- `ARCH9005` ignora `.editorconfig` por árvore e `TreatWarningsAsErrors` (documentado no README).
 
-- **Fase 0 (spike de viabilidade Roslyn) concluída** — commit `fe902e6`. Provou o pool de slots na
-  prática (sem `AD0001`) e congelou os contratos (`ILayerResolver`, `IRuleEvaluator`).
-- **Fase 1 (fundações: config-parser, analyzer-core, infra-tests) concluída** — commit `73e9bf4`.
-- **Fase 2 (tipos de regra) concluída** — `RuleEvaluatorRegistry.Default`
-  (`src/Arch.Analyzer/RuleEvaluatorRegistry.cs`) está populado com os 4 tipos de regra do ADR-001:
-  `forbidden-call`, `must-route-through`, `naming-convention`, `max-dependencies`.
-- **Fase 3 (ergonomia — CLI e documentação) concluída** — CLI `arch-rules gen`/`validate`
-  funcional — testado manualmente pelo arquiteto de ponta a ponta contra um YAML real.
-- **Fase 4 (verificação — dogfooding, revisão adversarial, auditoria de performance) concluída** —
-  dogfooding real via `.nupkg` em `tests/Arch.Dogfood/`, benchmarks reais de memoização/alocação em
-  `tests/Arch.Benchmarks/`, correção crítica de timing do ILRepack (só no `dotnet pack`) e do
-  empacotamento de `build/*.targets`, `extends` funcionando no analyzer real. Gate final verificado
-  pelo arquiteto de forma independente, incluindo testes manuais isolados fora do repo confirmando
-  F1 (diagnóstico aparece sem editar `.csproj`) e F2 (`extends` funciona no analyzer).
-
-Fases seguintes do plano (cada uma só começa com o gate da anterior fechado):
-
-- **Fase 2 — Tipos de regra (CONCLUÍDA):** 4 trilhas paralelas implementando `IRuleEvaluator` (
-  `forbidden-call`, `must-route-through` como açúcar sobre a anterior, `naming-convention`,
-  `max-dependencies`), isoladas por arquivo em `src/Arch.Rules/`.
-- **Fase 3 — Ergonomia (CONCLUÍDA):** 2 trilhas paralelas — CLI gerador de `.globalconfig`/lock file
-  (`Arch.Cli`) e documentação/JSON Schema publicado.
-- **Fase 4 — Verificação adversarial:** 3 trilhas paralelas — dogfooding em repositório real,
-  revisão adversarial obrigatória por agente sem investimento no código escrito, e auditoria de
-  performance contra o orçamento de <5% de overhead de build.
+Histórico (commits): Fase 0 `fe902e6`, Fase 1 `73e9bf4`, Fase 2 `937fec8`, Fase 3 `7d08264`, Fase 4
+`55adb7c`; ciclo de publicação `38eca4f`…`287c86e`.
 
 ## 7. Regra de processo
 
@@ -215,85 +181,93 @@ fixa contratos compartilhados (interfaces, trechos do ADR) no prompt de cada del
 - **Separação de dependências entre modelo e contratos Roslyn.** O modelo de dados (`ArchConfig`,
   `LayerDefinition`, `LayerMatchCriterion`, `RuleDefinition`) mora em `Arch.Config` e não depende de
   Roslyn. `ILayerResolver`/`IRuleEvaluator` moram em `Arch.Analyzer.Contracts`, porque dependem de
-  tipos do Roslyn (`Compilation`, `INamedTypeSymbol` etc.) — não podiam ficar em `Arch.Config`.
-- **Extração de `Arch.Analyzer.Contracts` (Fase 2).** `IRuleEvaluator`/`ILayerResolver` viviam antes
-  dentro de `Arch.Analyzer`. Na integração da Fase 2 eles foram extraídos para um projeto próprio,
-  `Arch.Analyzer.Contracts` (netstandard2.0, referencia só `Arch.Config` +
-  `Microsoft.CodeAnalysis.CSharp`). Motivo: `Arch.Analyzer` precisa instanciar os avaliadores
-  concretos de `Arch.Rules` (para popular `RuleEvaluatorRegistry.Default`), e `Arch.Rules` precisa
-  dos contratos para implementá-los — se os contratos continuassem dentro de `Arch.Analyzer`, isso
-  fecharia um ciclo `Arch.Analyzer` → `Arch.Rules` → `Arch.Analyzer`. Com os contratos num terceiro
-  projeto, a cadeia fica linear: `Arch.Analyzer` → `Arch.Rules` → `Arch.Analyzer.Contracts` →
-  `Arch.Config`, e `Arch.Analyzer` também referencia `Arch.Analyzer.Contracts` diretamente.
-- **Como `RuleDefinition.Extra` carrega os campos de cada tipo de regra** — convenção estabelecida
-  que qualquer novo tipo de regra (v2+) deve seguir, documentada em detalhe nos próprios avaliadores
-  (`src/Arch.Rules/ForbiddenCallEvaluator.cs`, `MustRouteThroughEvaluator.cs`):
-  - `from`/`to` (forbidden-call, must-route-through): escalares simples, `Extra["from"] = "Controller"`.
-  - `through` (must-route-through): uma `YamlSequenceNode` no YAML (ex.: `through: [Service]`) é
-    serializada pelo parser com `string.Join(",", ...)` — **sem espaço** após a vírgula — numa única
-    string em `Extra`. Uma lista de um item vira `"Service"`; de dois itens, `"Service,Outro"`.
-  - `layer`/`require`/`max`/`countBy` (naming-convention e max-dependencies, trilhas 2C/2D): formatos
-    próprios, documentados nos respectivos arquivos (`NamingConventionEvaluator.cs`,
-    `MaxDependenciesEvaluator.cs`) — não repetidos aqui para evitar duas fontes de verdade.
-- **Ponto de entrada do parser.** `Arch.Config.ArchConfigParser.Parse(string) : ArchConfigParseResult`
-  é o único ponto de entrada. Erros de schema são `SchemaValidationError` (`Code`/`Message`/`Line`/
-  `Column`/`IsBlocking`). Um erro `IsBlocking = true` (ex.: `ARCH9001`) zera `Config` no resultado e
-  interrompe o registro de regras; um erro não bloqueante (ex.: `ARCH9003`, tipo de regra
-  desconhecido) deixa `Config` utilizável e não impede as demais regras de valerem.
-- **`ArchConfigParser.Parse(IReadOnlyList<string>)` agora é API pública (desde a Fase 3).** Esse
-  overload (resolução de `extends`) era `internal`, visível só para os testes. Com `Arch.Cli`
-  consumindo-o diretamente em produção (`ConfigPipeline.cs`/`ExtendsResolver.cs`), ele foi promovido
-  a `public`. Qualquer mudança de assinatura futura quebra um consumidor de produção real, não só um
-  teste — tratar como contrato estável.
+  tipos do Roslyn. A cadeia é linear: `Arch.Analyzer` → `Arch.Rules` → `Arch.Analyzer.Contracts` →
+  `Arch.Config` (e `Arch.Analyzer` também referencia Contracts diretamente) — se os contratos
+  vivessem em `Arch.Analyzer`, fechariam o ciclo `Arch.Analyzer` → `Arch.Rules` → `Arch.Analyzer`.
+- **`RuleTypeCatalog` (`src/Arch.Config/RuleTypeCatalog.cs`) é a fonte de verdade de tipos de regra e
+  de seus campos** (nome, forma — escalar/lista/inteiro/par —, obrigatoriedade, valores aceitos).
+  `RuleTypeCatalog.Default` traz os 4 tipos de v1; `TryGetType` ignora caixa e espaços nas pontas e o
+  tipo é gravado em `RuleDefinition.Type` na forma canônica. **O parser valida contra o catálogo**:
+  tipo desconhecido → `ARCH9003` (não bloqueante, campos nem examinados); tipo conhecido com campo
+  obrigatório ausente, chave que o tipo não aceita ou valor inválido → `ARCH9008` (não bloqueante, a
+  regra é descartada). `RuleEvaluatorRegistry.Default` (analyzer) é só **despacho** — mantém um
+  `ARCH9003` de fallback para uma regra cujo tipo o catálogo conhece mas que não tem avaliador — e o
+  teste `RuleEvaluatorRegistryDefaultTests` garante que catálogo e registro declaram os mesmos tipos.
+  Um novo tipo de regra (v2+) precisa de: um `RuleTypeSchema` no catálogo, um `IRuleEvaluator` em
+  `Arch.Rules` e a entrada em `Default`.
+- **`RuleDefinition.Properties`** (`IReadOnlyDictionary<string, RulePropertyValue>`, chaves sensíveis a
+  caixa) carrega os campos específicos já **tipados** na forma do catálogo. `RuleDefinition.Extra`
+  (texto) é **derivado** do mesmo dado, por compatibilidade: lista vira `"A,B"` (`string.Join(",", ...)`,
+  sem espaço), par vira `"chave=valor"`, inteiro em cultura invariante. Os acessores `GetString`/
+  `GetList`/`TryGetInt`/`TryGetKeyValue` leem das duas formas (uma regra montada só com `extra` recebe
+  `Properties` escalares). `RuleDefinition.FromProperties` é a fábrica que o parser usa.
+  `SourceLine`/`SourceColumn`/`SourceDocumentIndex` ancoram diagnósticos no arquivo da cadeia que
+  declarou a regra.
+- **`SlotPool`** (`src/Arch.Config/SlotPool.cs`) — tamanho do pool (512), formato `ARCH` + 4 dígitos ASCII
+  e normalização (trim, sem diferenciar caixa) numa só fonte, usada pelo parser, por
+  `ArchDiagnostics.TryGetSlot` (analyzer) e por `SlotValidator` (CLI) — os três dão o mesmo veredito.
+  **`SeverityVocabulary`** (`src/Arch.Config/SeverityVocabulary.cs`) — `error`/`warning`/`suggestion`/
+  `silent`/`none` (nunca `info`/`hidden`) e `Resolve(config, rule)` (nome livre → valor), usado pelo CLI
+  (`SeverityResolver`) e por `SeverityDivergence` (analyzer).
+- **`ExtendsChainResolver`** (`src/Arch.Config/ExtendsChainResolver.cs`) é o resolvedor **único** da cadeia
+  de `extends`, usado pelo analyzer (loader sobre `@(AdditionalFiles)`, sem I/O — `ArchRulesAnalyzer.cs`)
+  e pelo CLI (loader de disco — `ExtendsResolver.cs`). Não faz I/O: recebe `loader` e `combinePath`.
+  Travessia em profundidade e pós-ordem (o arquivo estendido entra antes de quem o estende → ordem
+  crescente de precedência). Limites `DefaultMaxDepth = 32` níveis / `DefaultMaxTexts = 64` arquivos;
+  problemas tipados (`Missing`/`Cycle`/`DepthExceeded`) cortam só o ramo. Política de erro é do
+  chamador: warning não bloqueante no analyzer (`ARCH9006`/`ARCH9007`), erro bloqueante no CLI.
+- **Ponto de entrada do parser.** `Arch.Config.ArchConfigParser.Parse(string)` e `Parse(IReadOnlyList<string>)`
+  (cadeia de textos já resolvida, em ordem crescente de precedência — **API pública estável**, consumida
+  pelo CLI em produção) devolvem `ArchConfigParseResult`. Erros de schema são `SchemaValidationError`
+  (`Code`/`Message`/`Line`/`Column`/`IsBlocking`/`SourceDocumentIndex`). Um erro `IsBlocking = true` (ex.:
+  `ARCH9001`) zera `Config` e interrompe o registro de regras; um erro não bloqueante (`ARCH9003`,
+  `ARCH9008`) deixa `Config` utilizável e as demais regras valem. Nenhuma exceção escapa do parser
+  (rede de segurança → `ARCH9001`). **`ArchConfigParser.PeekExtends(string)`** (pública) extrai só a
+  lista de `extends:` sem validar o resto — é o que o analyzer usa para descobrir quais
+  `AdditionalFiles` fazem parte da cadeia.
 - **Faixa ARCH9xxx hoje:** `ARCH9001` (config inválida/schema, `Error`, invalida o arquivo inteiro),
-  `ARCH9002` (slot fora do pool de 512 ou duplicado entre regras, `Warning`, regra ignorada),
-  `ARCH9003` (tipo de regra desconhecido, `Warning`, regra ignorada — desde a Fase 2 só ocorre para
-  um `type` de fato não coberto por nenhum dos 4 avaliadores registrados em
-  `RuleEvaluatorRegistry.Default`; antes da Fase 2, com o registro vazio, toda regra caía aqui),
-  `ARCH9004` (nome de tipo em `implements`/`baseType`/`attribute` não resolvido
-  via `GetTypeByMetadataName`, `Warning`, critério ignorado), `ARCH9005` (reservado para divergência
-  YAML×`.globalconfig`, `Info`, usado só a partir da Fase 3).
-- **Ponto de extensão para novos tipos de regra (v2+).** `RuleEvaluatorRegistry`
-  (`src/Arch.Analyzer/RuleEvaluatorRegistry.cs`) é onde se registra um `IRuleEvaluator` por `type` de
-  regra — `Default` já contém os 4 do ADR-001 (`forbidden-call`, `must-route-through`,
-  `naming-convention`, `max-dependencies`), um arquivo por tipo em `src/Arch.Rules/`. O roteamento, o
-  cache de `ArchConfig` e o resolvedor de camadas são provados por `ArchRulesAnalyzerPipelineTests`
-  (que registra um avaliador de teste e exercita o pipeline inteiro); um novo tipo de regra só
-  precisa de um `IRuleEvaluator` novo em `Arch.Rules` e de uma entrada em `Default`.
-- **Riscos levantados na Fase 1, para revisão futura (Fase 4 adversarial):**
-  - Diagnósticos de erro de config são reportados via `RegisterCompilationEndAction`; o comportamento
-    em live analysis de IDE (Error List atualizando durante digitação, não só no build) ainda não foi
-    verificado.
-  - Risco de duplicação de `ARCH9003` se um tipo de regra futuro também passar a validar tipos
-    desconhecidos dentro do parser: a checagem de `type` deve continuar sendo responsabilidade
-    exclusiva do
-    analyzer (via `RuleEvaluatorRegistry`), nunca do parser em `Arch.Config`.
-- **`ArchConfigParser.PeekExtends(string yamlText) : IReadOnlyList<string>`** (API pública, Fase 4,
-  `src/Arch.Config/ArchConfigParser.cs`) — extrai só a lista declarada em `extends:` de um YAML,
-  sem fazer o parse completo do schema. É o que permite ao analyzer (que não pode fazer I/O de
-  disco, RS1035) descobrir quais outros `AdditionalFiles` fazem parte da cadeia de `extends` de um
-  arquivo, resolvendo-a inteiramente a partir do que o MSBuild já forneceu.
-- **`ARCH9006`** (warning, não bloqueante) — um caminho declarado em `extends:` não tem
-  `AdditionalFile` correspondente na compilação; a camada ausente é ignorada e o resto da cadeia
-  continua valendo. **`ARCH9007`** (warning, não bloqueante) — cadeia de `extends` inválida (ciclo,
-  ou profundidade acima do limite do resolvedor); o ramo problemático é cortado. Ambos reportados só
-  pelo analyzer (`ArchRulesAnalyzer.cs`), nunca pelo parser em `Arch.Config` — descrevem a resolução
-  contra `@(AdditionalFiles)`, que é integração, não schema.
-- **Convenção de nome `arch-rules.*.yaml` para resolução automática de `extends`.** Só arquivos
-  nesse padrão (ao lado do `.csproj`, exceto o próprio `arch-rules.yaml` e o `arch-rules.lock.yaml`
-  gerado pelo CLI) entram automaticamente em `@(AdditionalFiles)` via `build/Arch.Analyzer.targets`.
-  Um arquivo de `extends` fora dessa convenção (nome ou diretório diferentes) precisa de
-  `<AdditionalFiles Include="..." />` manual no `.csproj` do consumidor; sem isso o analyzer reporta
-  `ARCH9006` dizendo exatamente qual caminho faltou.
+  `ARCH9002` (slot fora do pool ou duplicado, `Warning`, regra ignorada), `ARCH9003` (tipo de regra
+  desconhecido, `Warning`, regra ignorada), `ARCH9004` (nome em `implements`/`baseType`/`attribute` não
+  resolvido via `GetTypeByMetadataName`, `Warning`, critério ignorado), **`ARCH9005`** (`Info`;
+  **emitido de verdade** pelo analyzer — `SeverityDivergence` — quando a severidade declarada no YAML
+  diverge da efetiva do slot; precedência do compilador: `SpecificDiagnosticOptions` → `.globalconfig`
+  → default do descriptor; **ignora `.editorconfig` por árvore e `TreatWarningsAsErrors`**; um por
+  regra, no compilation-start; o CLI `validate` tem um aviso análogo quando o lock file diverge),
+  `ARCH9006` (`extends` sem `AdditionalFile`, `Warning`), `ARCH9007` (ciclo/profundidade em `extends`,
+  `Warning`), **`ARCH9008`** (regra de tipo conhecido com campo ausente/desconhecido/inválido,
+  `Warning`, regra ignorada; emitido pelo parser). `ARCH9006`/`ARCH9007`/`ARCH9005` são reportados só
+  pelo analyzer (descrevem a resolução contra `@(AdditionalFiles)` e a compilação, não schema).
+  Um código de motor desconhecido para o analyzer cai em `ARCH9001`/`ARCH9002`
+  (`ArchDiagnostics.GetEngineDescriptorOrFallback`).
+- **Convenção de nome `arch-rules.*.yaml` para `extends`.** Só arquivos nesse padrão (ao lado do
+  `.csproj`, exceto `arch-rules.yaml` e o `arch-rules.lock.yaml` gerado pelo CLI) entram
+  automaticamente em `@(AdditionalFiles)` via `build/RuleKit.Analyzer.targets`. Fora da convenção, o
+  consumidor adiciona `<AdditionalFiles Include="..." />` manualmente; senão o analyzer reporta
+  `ARCH9006` com o caminho que faltou. O CLI não tem essa restrição (lê o disco), então um `validate`
+  verde não prova que o analyzer enxergou o arquivo.
+- **`.globalconfig`/lock gerados pelo CLI.** `gen` escreve por padrão ao lado do YAML (onde o
+  compilador descobre `.globalconfig` sem configuração); só regras `enabled` entram. Sem `gen`, os
+  slots reportam o default do descriptor (`warning`). `validate` e `gen` tratam `ARCH9003`/`ARCH9008`
+  como `AVISO` (não bloqueante, exit 0) e erro de slot/`extends`/severidade como bloqueante (exit 1).
+- **Riscos em aberto para v2:** os erros do motor saem em `RegisterCompilationEndAction` (#20); a
+  checagem de `type` mora agora no parser (catálogo) *e* no despacho do analyzer — manter os dois
+  alinhados pelo teste acima.
 
-## 9. v1 fechado — itens de limpeza opcionais para o futuro
+## 9. Itens de limpeza
 
-- `tests/Arch.Spike.Consumer/` e `tests/Arch.Spike.ControlAnalyzer/` são artefatos da Fase 0 e
-  referenciam o `PackageId` antigo (`Arch.Analyzer.Spike`/`0.1.0-spike`, hoje `Arch.Analyzer`/
-  `0.1.0`) — candidatos a remoção ou atualização; não fazem parte da lib final.
-- A linha manual `<AdditionalFiles Include="arch-rules.yaml" />` em
-  `tests/Arch.Dogfood/Arch.Dogfood.Sample.csproj` ficou redundante depois da correção de F1
-  (`build/Arch.Analyzer.targets` já cobre isso automaticamente) — inofensiva, mas pode ser removida.
-- O contorno por reflexão em `tests/Arch.Benchmarks` (documentado na trilha 4C), usado para lidar
-  com tipos duplicados via `ProjectReference`, deixou de ser necessário depois da correção do timing
-  do ILRepack (agora só roda no `dotnet pack`) — pode ser simplificado.
+Os itens opcionais do fechamento da v1 foram resolvidos no ciclo de publicação: os projetos de spike
+da Fase 0 foram removidos, o dogfood usa o `build/RuleKit.Analyzer.targets` (sem `AdditionalFiles`
+manual) e o contorno por reflexão de `Arch.Benchmarks` foi eliminado. Nada pendente aqui.
+
+## 10. Release
+
+1. `main` verde (CI: build-test, smoke, windows-vs, perf) e `CHANGELOG.md` com a seção da versão.
+2. Tag `vX.Y.Z` **num commit da `main`** (`git tag vX.Y.Z && git push origin vX.Y.Z`); o `publish.yml`
+   recusa tag fora da `main`. O README empacotado é o do commit da tag — **comite a documentação antes
+   de criar a tag**.
+3. `publish.yml` (disparado por `push` de tag `v*`): build + testes + pack; confere que
+   `RuleKit.Analyzer.<ver>.nupkg`, `RuleKit.Cli.<ver>.nupkg` e `.snupkg` têm a versão da tag (MinVer);
+   `NuGet/login@v1` (**Trusted Publishing**, usuário `samueldias21`, policy do nuget.org cadastrada para
+   `SamuelGFDias/rulekit` + `publish.yml`, **sem `environment`** — declarar um no job faria o login
+   falhar); `dotnet nuget push artifacts/*.nupkg --skip-duplicate`; `gh release create` com os
+   pacotes. Sufixo na tag (`v1.0.0-rc.1`) = pré-lançamento.

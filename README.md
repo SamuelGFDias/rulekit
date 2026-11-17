@@ -1,73 +1,198 @@
 # RuleKit
 
-Motor de regras arquiteturais para .NET, distribuído como Roslyn Analyzer configurável. A lib não
-embute nenhuma regra de negócio: cada organização declara sua própria política num arquivo YAML
-externo (`arch-rules.yaml`) e recebe diagnósticos de violação em tempo de compilação — no `dotnet
-build`, no CI, e ao vivo no Error List da IDE.
+RuleKit valida padrões arquiteturais de projetos .NET **em tempo de compilação**. É um Roslyn
+Analyzer configurável: a lib não embute nenhuma regra de negócio — cada organização declara a sua
+política num arquivo YAML (`arch-rules.yaml`) e recebe diagnósticos de violação no `dotnet build`,
+no CI e na IDE, sem fork da lib e sem regra hardcoded. A severidade de cada regra é ajustável
+individualmente por `.editorconfig`/`.globalconfig` e silenciável pontualmente com
+`#pragma warning disable`.
 
-> **Status:** Fases 0-2 do plano de execução concluídas (spike de viabilidade Roslyn, fundações e os
-> 4 tipos de regra do ADR-001), com **94 testes** aprovados e 0 falhas. Fase 3 (ergonomia — CLI
-> gerador de `.globalconfig` e esta documentação) em andamento. Ainda não há release publicado num
-> feed NuGet público — ver [Instalação](#instalação). Pendência conhecida: validação em host .NET
-> Framework/Visual Studio ainda fora do pipeline de CI, rastreada na
-> [issue #1](https://github.com/SamuelGFDias/rulekit/issues/1).
+Dois pacotes no NuGet:
 
-## O problema
-
-Ferramentas de arquitetura em .NET geralmente caem em dois extremos: rodam como suíte de testes
-(ArchUnitNET, NetArchTest) e perdem o feedback nativo da IDE, ou exigem regras hardcoded por
-organização. O objetivo aqui é um pacote NuGet único que qualquer organização instala e configura
-via YAML, sem fork nem regra fixa na lib.
-
-## Como funciona (visão geral)
-
-A decisão central da arquitetura é o **pool de slots**: o contrato do Roslyn exige que
-`DiagnosticAnalyzer.SupportedDiagnostics` seja conhecido sem contexto de compilação, então a lib
-pré-declara descriptors estáveis (`ARCH0001`…`ARCH0512`) e o YAML mapeia o ID de negócio da
-organização (`ACME-001`) a um desses slots técnicos (`ARCH0007`) — é o slot, não o ID de negócio,
-que o compilador, o `.editorconfig`/`.globalconfig` e `#pragma warning disable` de fato enxergam.
-Isso dá override de severidade por regra individual, funciona em live analysis na IDE sem build, e
-permite silenciar pontualmente uma regra com `#pragma`.
-
-Detalhes completos das quatro decisões estruturais (formato do arquivo, sintaxe de camadas e
-regras, nomenclatura dos níveis de severidade, versionamento de schema) estão no
-[ADR-001](ADR-001-motor-regras-arquiteturais.md).
+| Pacote | O que é |
+|---|---|
+| `RuleKit.Analyzer` | O analyzer (DLL única, sem dependências). Instalado no projeto que você quer verificar. |
+| `RuleKit.Cli` | A ferramenta `arch-rules` (`dotnet tool`): valida o YAML e gera o `.globalconfig` com as severidades. |
 
 ## Instalação
 
-O pacote ainda não está publicado num feed NuGet público. Enquanto isso, o consumo é local/interno:
+```bash
+# no projeto que será verificado
+dotnet add package RuleKit.Analyzer
 
-1. Gere o `.nupkg` a partir do fonte (a Fase 0 já valida esse caminho: `Arch.Config` e `Arch.Rules`
-   são fundidos em `Arch.Analyzer.dll` no pack):
+# a ferramenta de linha de comando (global; também funciona como ferramenta local do repositório)
+dotnet tool install -g RuleKit.Cli        # comando: arch-rules
+```
 
-   ```bash
-   dotnet pack src/Arch.Analyzer -c Release
+### Requisitos
+
+- **Analyzer (`RuleKit.Analyzer`):** compilado contra `Microsoft.CodeAnalysis.CSharp` 4.8, a menor
+  versão suportada — exige compilador do **SDK .NET 8+** ou **Visual Studio 2022 17.8+**. O CI também
+  o carrega no MSBuild/csc (.NET Framework) do Visual Studio 18, sem `FileLoadException` nem `AD0001`.
+  O projeto consumidor pode ter qualquer `TargetFramework` que o seu SDK compile.
+- **CLI (`RuleKit.Cli`):** exige o **runtime .NET 10 ou superior** (a ferramenta é compilada para
+  `net10.0`; `RollForward=Major` permite rodar em runtimes mais novos, nunca em mais antigos). Se o
+  seu SDK for mais antigo, a ferramenta não inicia — veja [Limitações](#limitações-conhecidas).
+
+## Quickstart
+
+1. Crie `arch-rules.yaml` **ao lado do `.csproj`** do projeto verificado:
+
+   ```yaml
+   # yaml-language-server: $schema=https://raw.githubusercontent.com/SamuelGFDias/rulekit/main/docs/schema/arch-rules.v1.json
+   schema: arch-rules/v1
+
+   layers:
+     Controller:
+       match:
+         - nameSuffix: Controller
+     Repository:
+       match:
+         - nameSuffix: Repository
+
+   severities:
+     bloqueante: error
+
+   rules:
+     - id: ACME-001
+       slot: ARCH0001
+       type: forbidden-call
+       from: Controller
+       to: Repository
+       severity: bloqueante
+       message: "{from} não pode acessar {to} diretamente ({symbol}). Passe por um Service."
    ```
 
-2. Aponte seu projeto para o `.nupkg` gerado, por exemplo via uma fonte de pacote local no
-   `NuGet.Config`, ou referenciando o caminho do pacote diretamente:
+2. Valide e gere o `.globalconfig` (e o `arch-rules.lock.yaml`) ao lado do YAML:
 
    ```bash
-   dotnet nuget add source /caminho/para/o/nupkg --name rulekit-local
-   dotnet add package Arch.Analyzer --source rulekit-local
+   arch-rules validate arch-rules.yaml     # OK: configuração válida.
+   arch-rules gen arch-rules.yaml          # Gerado: .../.globalconfig  e  .../arch-rules.lock.yaml
    ```
 
-   Quando um release público existir, esta seção será atualizada com o comando `dotnet add package`
-   real contra o feed publicado — não use um comando de exemplo daqui como se já existisse hoje.
+3. Rode `dotnet build`. Um `Controller` que usa um `Repository` diretamente agora **quebra o build**:
 
-### Nada de editar o `.csproj` à mão
+   ```text
+   Controllers/PedidoController.cs(5,29): error ARCH0001: ACME-001: Controller não pode acessar Repository diretamente (PedidoRepository.Todos). Passe por um Service.
+   ```
 
-O pacote traz um `build/Arch.Analyzer.targets`, importado automaticamente pelo NuGet em qualquer
-projeto que o instale via `PackageReference`. Ele adiciona aos `AdditionalFiles` do compilador:
+Nenhuma edição de `.csproj` é necessária: o pacote registra o `arch-rules.yaml` do projeto como
+`AdditionalFiles` sozinho, e o compilador descobre o `.globalconfig` na pasta do projeto. Sem rodar
+`arch-rules gen`, as regras já funcionam, mas todas reportam o padrão do slot — **warning** — em vez
+da severidade declarada no YAML.
 
-- **`arch-rules.yaml` do diretório do projeto** — instalar o pacote e criar esse arquivo basta para
-  ver diagnósticos;
-- **`arch-rules.*.yaml` do mesmo diretório** (ex.: `arch-rules.base.yaml`), para que os arquivos
-  citados em `extends:` também cheguem ao analyzer.
+## Como funciona: o pool de slots
 
-Essa convenção de nome existe porque um analyzer roda dentro do compilador e **não pode ler do
-disco**: ele só enxerga o que o MSBuild passou em `AdditionalFiles`. Um arquivo de `extends` com
-outro nome, ou em outro diretório, continua precisando de uma linha explícita no `.csproj`:
+O Roslyn lê `SupportedDiagnostics` sem contexto de compilação (antes de existir qualquer YAML), e
+um diagnóstico com ID não declarado ali vira `AD0001`. Por isso o analyzer pré-declara **512 slots
+estáveis, `ARCH0001`…`ARCH0512`**, e o YAML mapeia o ID de negócio da sua organização a um deles:
+
+```yaml
+- id: ACME-001      # identidade da organização — aparece na mensagem e em Diagnostic.Properties["archRuleId"]
+  slot: ARCH0007    # identidade técnica — é o que o compilador, o .editorconfig e o #pragma enxergam
+```
+
+Cada regra precisa de um slot próprio (slot duplicado ou fora do pool → [`ARCH9002`](#diagnósticos-do-motor-arch9001arch9008)).
+Quem escolhe o slot é você: o CLI não aloca, só valida. Com isso:
+
+```ini
+# .editorconfig — override de severidade por regra, por projeto/pasta
+[*.cs]
+dotnet_diagnostic.ARCH0007.severity = suggestion
+```
+
+```csharp
+#pragma warning disable ARCH0007 // silencia só esta regra, só neste trecho
+```
+
+A decisão completa e as alternativas descartadas estão no
+[ADR-001](https://github.com/SamuelGFDias/rulekit/blob/main/ADR-001-motor-regras-arquiteturais.md).
+
+## Referência do YAML
+
+O schema machine-readable está em
+[`docs/schema/arch-rules.v1.json`](https://github.com/SamuelGFDias/rulekit/blob/main/docs/schema/arch-rules.v1.json)
+(JSON Schema draft 2020-12). Para ter autocomplete e validação no editor (VS Code com a extensão
+YAML da Red Hat, por exemplo), coloque o modeline na primeira linha do arquivo:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/SamuelGFDias/rulekit/main/docs/schema/arch-rules.v1.json
+```
+
+O YAML aceito é um subconjunto restrito: **sem anchors/aliases, sem multi-documento, sem tags
+customizadas**; chave desconhecida é erro, não silêncio.
+
+### Chaves de nível raiz
+
+| Chave | Obrigatória | Descrição |
+|---|---|---|
+| `schema` | sim | Sempre `arch-rules/v1`. Outra MAJOR → `ARCH9001`. |
+| `extends` | não | Lista de caminhos de outros YAMLs a compor (ver [extends](#extends-e-a-convenção-arch-rulesyaml)). |
+| `layers` | sim | Mapa `NomeDaCamada → { match: [...], exclude?: [...] }`. |
+| `severities` | não | Mapa `nome-livre → nível real` (`error`, `warning`, `suggestion`, `silent`, `none`). |
+| `defaults.severity` | não | Nome de severidade aplicado às regras que não declaram `severity`. |
+| `rules` | sim | Lista de regras. |
+
+**Camadas.** Cada item de `match`/`exclude` tem exatamente **uma** chave: `namespace`, `nameSuffix`,
+`baseType`, `implements` ou `attribute`. Itens da mesma lista combinam por **OU**; `exclude` é
+aplicado depois do `match`. `namespace` aceita `*` (exatamente um segmento) e `**` (zero ou mais):
+`Acme.Api.**` casa `Acme.Api` e `Acme.Api.Controllers.V2`, e um namespace sem curinga casa só ele
+mesmo, nunca os descendentes. `baseType`/`implements`/`attribute` pedem o nome totalmente
+qualificado; um nome que não resolve na compilação gera `ARCH9004` e o critério é ignorado.
+
+**Severidades.** Os nomes são livres (`bloqueante`, `aviso`…); os valores são só os cinco que o
+`dotnet_diagnostic.<ID>.severity` aceita — nunca `info`/`hidden`. `suggestion` vira `Info` e
+`silent` vira `Hidden` na escala do compilador. Toda regra precisa resolver para uma severidade
+(própria ou `defaults.severity`), senão o `arch-rules validate`/`gen` falha.
+
+### Campos comuns de cada regra
+
+`id` (livre, pode ter hífen), `slot` (`ARCH0001`…`ARCH0512`), `type`, `enabled` (padrão `true`; `false`
+mantém a regra documentada sem reportar nada), `severity`, `message`, `help` (URL exposta em
+`Diagnostic.Properties["archHelp"]`).
+
+`message` aceita os placeholders `{from}`, `{to}`, `{symbol}`, `{id}` e qualquer campo da regra
+(`{through}`, `{layer}`…; sensíveis a caixa, como a chave do YAML), mas só é usado por
+`forbidden-call` e `must-route-through` — `naming-convention` e `max-dependencies` emitem uma
+mensagem fixa.
+
+### Os quatro tipos de regra
+
+O catálogo é a fonte de verdade do parser (`RuleTypeCatalog`): tipo de regra conhecido com campo
+obrigatório ausente, chave que o tipo não aceita ou valor inválido → regra ignorada com
+[`ARCH9008`](#diagnósticos-do-motor-arch9001arch9008). `type` ignora caixa e espaços nas pontas
+(`Forbidden-Call` vale `forbidden-call`); os nomes de campo, não.
+
+| `type` | Obrigatórios | Opcionais | Semântica |
+|---|---|---|---|
+| `forbidden-call` | `from`, `to` | — | Nenhum tipo da camada `from` pode invocar método, criar instância ou ler propriedade/campo de um tipo da camada `to`. |
+| `must-route-through` | `from`, `to` | `through` | Mesma detecção de `forbidden-call` (é açúcar sobre ele). `through` (lista de camadas) só alimenta a mensagem (`{through}`) — o caminho real `from → through → to` **não** é verificado. |
+| `naming-convention` | `layer`, `require` | — | Todo tipo da camada `layer` precisa obedecer `require: { suffix: X }` ou `require: { prefix: X }` — exatamente um par. |
+| `max-dependencies` | `layer`, `max`, `countBy` | — | Tipo da camada `layer` não pode ter mais que `max` (inteiro ≥ 0) dependências **distintas**; limite inclusivo. `countBy`: `constructor-parameters` (maior construtor público), `fields` (campos de instância `private`/`protected` do próprio tipo, não primitivos) ou `all` (união das duas). |
+
+Exemplo com os quatro:
+
+```yaml
+rules:
+  - { id: ACME-001, slot: ARCH0001, type: forbidden-call,     from: Controller, to: Repository, severity: bloqueante }
+  - { id: ACME-002, slot: ARCH0002, type: must-route-through, from: Service, to: Persistence, through: [Repository], severity: aviso }
+  - { id: ACME-003, slot: ARCH0003, type: naming-convention,  layer: Repository, require: { suffix: Repository }, severity: aviso }
+  - { id: ACME-004, slot: ARCH0004, type: max-dependencies,   layer: Service, max: 5, countBy: constructor-parameters, severity: aviso }
+```
+
+Um `type` que esta versão não conhece gera `ARCH9003` (warning) e **só aquela regra** é ignorada —
+as demais continuam valendo (política MINOR aditiva do ADR-001 D4).
+
+## extends e a convenção `arch-rules.*.yaml`
+
+`extends: [arch-rules.base.yaml]` compõe políticas: o arquivo que estende vence, e `layers`/`rules`
+fazem merge por nome/`id` (a regra do arquivo que estende substitui a base, na mesma posição;
+`enabled: false` desliga sem apagar). Os caminhos são relativos ao arquivo que os declara.
+
+O analyzer roda dentro do compilador e **não lê disco**: só enxerga o que o MSBuild entrega em
+`AdditionalFiles`. O pacote adiciona automaticamente, do diretório do projeto, o `arch-rules.yaml` e
+todo `arch-rules.*.yaml` (menos o `arch-rules.lock.yaml`). Um arquivo de `extends` com outro nome ou
+em outro diretório precisa de uma linha no `.csproj`:
 
 ```xml
 <ItemGroup>
@@ -75,229 +200,77 @@ outro nome, ou em outro diretório, continua precisando de uma linha explícita 
 </ItemGroup>
 ```
 
-Sem essa linha o build não fica silencioso: o analyzer reporta **`ARCH9006`** (warning) dizendo qual
-caminho faltou. Não é bloqueante — as regras que não dependiam do arquivo ausente continuam valendo.
-
-O CLI é diferente por natureza: `arch-rules gen` e `arch-rules validate` são processos comuns e leem
-o disco livremente, então resolvem a cadeia de `extends` **inteira**, com qualquer nome de arquivo e
-em qualquer diretório. Um `extends` que funciona no `validate` do CI mas não segue a convenção acima
-é exatamente o caso em que o `ARCH9006` aparece no build — o CLI não é prova de que o analyzer
+Sem ela o analyzer avisa com `ARCH9006` dizendo qual caminho faltou. O CLI lê o disco e resolve a
+cadeia inteira com qualquer nome — então um `validate` verde no CI **não** prova que o analyzer
 enxergou o arquivo.
 
-## Tutorial: política de 3 camadas do zero
+## Diagnósticos do motor (ARCH9001–ARCH9008)
 
-Este tutorial cobre o gate de saída da Fase 3: sair do zero e chegar a um diagnóstico visível na
-IDE, usando só o que está documentado aqui.
+A faixa `ARCH9xxx` é reservada aos erros do próprio motor, sempre habilitada por padrão e nunca
+alocável como slot. Pode ser ajustada ou silenciada como qualquer diagnóstico
+(`dotnet_diagnostic.ARCH9006.severity = none`, `#pragma`).
 
-### 1. Crie o `arch-rules.yaml`
+| ID | Severidade | Quando ocorre | Efeito |
+|---|---|---|---|
+| `ARCH9001` | Error | YAML malformado, `schema` ausente ou de MAJOR não suportada, chave desconhecida (raiz, camada, `defaults`), regra sem `id`/`slot`/`type`. | O arquivo inteiro é rejeitado; nenhuma regra é avaliada. |
+| `ARCH9002` | Warning | `slot` fora de `ARCH0001`…`ARCH0512` ou repetido entre regras. | A regra é ignorada. |
+| `ARCH9003` | Warning | `type` de regra que esta versão não conhece. | A regra é ignorada. |
+| `ARCH9004` | Warning | Nome em `baseType`/`implements`/`attribute` que não resolve na compilação (não qualificado, genérico sem aridade, pacote não referenciado). | O critério é ignorado. Um aviso por nome. |
+| `ARCH9005` | Info | A severidade declarada no YAML diverge da efetiva do slot — sinal de `.globalconfig` ausente ou desatualizado. | Informativo; rode `arch-rules gen`. |
+| `ARCH9006` | Warning | Um caminho de `extends` não tem `AdditionalFile` correspondente. | Aquela camada é ignorada; o resto da cadeia vale. |
+| `ARCH9007` | Warning | Cadeia de `extends` com ciclo ou acima do limite (32 níveis / 64 arquivos). | O ramo problemático é cortado. |
+| `ARCH9008` | Warning | Regra de tipo conhecido com campo obrigatório ausente, chave que o tipo não aceita ou valor inválido (`max` não inteiro, `countBy` fora dos aceitos…). | A regra é ignorada. |
 
-Coloque o arquivo ao lado do `.csproj` do projeto que você quer verificar, com três camadas
-(`Controller`, `Service`, `Repository`) e duas regras — uma `forbidden-call` e uma
-`naming-convention`:
+`ARCH9005` é `Info`: não aparece no console do `dotnet build` (nem em `-v:d`); para vê-lo, gere um log
+de erros (`dotnet build -p:ErrorLog=build.sarif`).
 
-```yaml
-schema: arch-rules/v1
+## CLI: `arch-rules`
 
-layers:
-  Controller:
-    match:
-      - nameSuffix: "Controller"
-      - baseType: "Microsoft.AspNetCore.Mvc.ControllerBase"
-  Service:
-    match:
-      - nameSuffix: "Service"
-      - implements: "Acme.Application.IService"
-  Repository:
-    match:
-      - nameSuffix: "Repository"
-    exclude:
-      - namespace: "Acme.*.Tests.**"
-
-severities:
-  restrita: error
-  media: warning
-
-defaults:
-  severity: media
-
-rules:
-  - id: ACME-001
-    slot: ARCH0001
-    type: forbidden-call
-    from: Controller
-    to: Repository
-    severity: restrita
-    message: "{from} não pode chamar {to} diretamente ({symbol}). Passe por um Service."
-    help: https://wiki.acme/arq/ACME-001
-
-  - id: ACME-002
-    slot: ARCH0002
-    type: naming-convention
-    layer: Repository
-    require: { suffix: Repository }
+```text
+arch-rules validate <yaml>                  valida o schema, os slots e as severidades; não escreve nada
+arch-rules gen <yaml> [--out <diretório>]   o mesmo, e gera .globalconfig + arch-rules.lock.yaml
 ```
 
-Isso declara: nenhum `Controller` pode chamar um `Repository` diretamente (erro de build), e todo
-tipo da camada `Repository` precisa terminar com o sufixo `Repository` (warning, por `defaults`).
+Ambos resolvem a cadeia de `extends` do disco e saem com código **1** quando algo bloqueia: YAML
+inválido (`ARCH9001`), slot inválido ou duplicado (`ARCH9002`), `extends` ausente/cíclico ou severidade
+não resolvida. Problemas que só descartam **uma regra** — `ARCH9003` (tipo desconhecido) e `ARCH9008`
+(campo ausente/inválido) — saem como linhas `AVISO [ARCH90xx] linha N, coluna M: ...` e **não**
+alteram o código de saída: no CI, falhe também quando a saída tiver `AVISO`. `gen` escreve por padrão ao lado do YAML — onde o compilador descobre o
+`.globalconfig` sem configuração — e `--out` muda o destino (nesse caso referencie o arquivo no
+`.csproj` como `GlobalAnalyzerConfigFiles`).
 
-Valide a sintaxe do arquivo contra o JSON Schema publicado
-(`docs/schema/arch-rules.v1.json`) — qualquer editor com suporte a YAML Language Server (VS Code
-com a extensão YAML, por exemplo) pode usar o schema para autocomplete e validação em tempo real
-apontando:
-
-```yaml
-# yaml-language-server: $schema=./docs/schema/arch-rules.v1.json
-schema: arch-rules/v1
-# ...
-```
-
-### 2. Gere o `.globalconfig`
-
-> A interface abaixo é a planejada para `Arch.Cli` (Fase 3, trilha paralela em construção). Se o
-> comando ainda não estiver disponível no seu checkout, trate esta seção como a especificação da
-> interface, não como confirmação de que o binário já existe.
-
-```bash
-arch-rules validate arch-rules.yaml     # valida o schema antes de gerar nada; falha o CI se inválido
-arch-rules gen arch-rules.yaml          # aloca slots, emite .globalconfig e arch-rules.lock.yaml
-```
-
-`arch-rules gen` lê o YAML, aloca (ou reaproveita, via o lock file) um slot `ARCH0xxx` para cada
-`id`, e escreve um `.globalconfig` como:
+O `.globalconfig` gerado tem uma linha por regra habilitada:
 
 ```ini
 is_global = true
 
-[*.cs]
 dotnet_diagnostic.ARCH0001.severity = error
-dotnet_diagnostic.ARCH0002.severity = warning
 ```
 
-Referencie o `.globalconfig` gerado no `.csproj` (ou deixe-o na raiz da solução, onde o SDK do .NET
-o descobre automaticamente) e referencie o pacote do analyzer no mesmo projeto.
+O `arch-rules.lock.yaml` é o retrato `id → slot → tipo → severidade → enabled`, para revisar mudanças
+de política em code review. Se ele já existir e divergir do que seria gerado, o `validate` avisa
+(`AVISO [ARCH9005]`) pedindo para rodar `gen` de novo — comite os dois arquivos.
 
-### 3. Veja o diagnóstico
+## Limitações conhecidas
 
-Ao escrever um `Controller` que chama um `Repository` diretamente:
+- **Sem extensão de terceiros na v1.** Os quatro tipos de regra são fixos; `RuleEvaluatorRegistry`
+  é interno e o pacote não expõe contratos públicos para registrar tipos novos
+  ([#21](https://github.com/SamuelGFDias/rulekit/issues/21)).
+- **Live analysis da IDE não verificada.** O build no host .NET Framework do Visual Studio é provado
+  no CI, mas o Error List atualizando enquanto se digita não foi verificado
+  ([#1](https://github.com/SamuelGFDias/rulekit/issues/1)), e os erros do motor (`ARCH9xxx`) saem no
+  fim da compilação, que pode não rodar na análise ao vivo padrão
+  ([#20](https://github.com/SamuelGFDias/rulekit/issues/20)).
+- **`ARCH9005` é aproximado.** Compara o YAML com `/warnaserror`, `/nowarn`, ruleset e o
+  `.globalconfig` (precedência do compilador), mas **ignora `.editorconfig` por árvore** (a severidade
+  pode variar por arquivo) e `TreatWarningsAsErrors` (muda todos os warnings, não o slot).
+- **Escopo do que se detecta.** Reflexão, `dynamic` e service locators escapam; código gerado não é
+  analisado. A lib previne deriva, não prova conformidade. `must-route-through` não verifica a rota.
+- **CLI exige runtime .NET 10+** (ver [Requisitos](#requisitos)).
 
-```csharp
-public class PedidoController : ControllerBase
-{
-    private readonly PedidoRepository _repo; // ARCH0001: Controller não pode chamar Repository diretamente
-}
-```
+## Mais
 
-o Error List da IDE mostra o diagnóstico assim que o arquivo é digitado (sem esperar build), com a
-mensagem expandida (`{from}`, `{to}`, `{symbol}` substituídos) e o ID de negócio (`ACME-001`)
-disponível em `Diagnostic.Properties["archRuleId"]`. Rodar `dotnet build` reproduz o mesmo erro e
-quebra o build em CI, porque a severidade `error` foi gravada no `.globalconfig`.
-
-## Referência da sintaxe do YAML
-
-Schema machine-readable completo: [`docs/schema/arch-rules.v1.json`](docs/schema/arch-rules.v1.json)
-(JSON Schema draft 2020-12). Resumo:
-
-| Chave | Obrigatória | Descrição |
-|---|---|---|
-| `schema` | sim | Sempre `arch-rules/v1`. Ver versionamento abaixo. |
-| `extends` | não | Lista de caminhos para outros `arch-rules.yaml` a compor por merge (o arquivo que estende vence; `layers`/`rules` fazem merge por nome/`id`). |
-| `layers` | sim | Mapa nome-livre → `{ match: [...], exclude?: [...] }`. Cada item de `match`/`exclude` tem **exatamente uma** chave: `namespace`, `nameSuffix`, `baseType`, `implements` ou `attribute`. Itens da mesma lista são combinados por OR; `exclude` é aplicado depois do `match`. |
-| `severities` | não | Mapa nome-livre → nível real (ver tabela abaixo). |
-| `defaults.severity` | não | Nome de severidade aplicado a regras que não declaram `severity` própria. |
-| `rules` | sim | Lista de regras (ver campos por tipo abaixo). |
-
-Campos comuns de cada item de `rules`: `id` (identidade de negócio, livre), `slot` (identidade
-técnica, `ARCH0001`..`ARCH0512`), `type`, `enabled` (default `true`), `severity` (nome de
-`severities`), `message` e `help` (opcionais).
-
-Campos específicos por `type` (`Extra`, confirmados contra os avaliadores reais em
-`src/Arch.Rules/`):
-
-| `type` | Campos extras obrigatórios | Semântica |
-|---|---|---|
-| `forbidden-call` | `from`, `to` | Nenhum tipo da camada `from` pode invocar método, criar instância, ler propriedade ou campo de um tipo da camada `to`. |
-| `must-route-through` | `from`, `to`, `through` | Mesma detecção de `forbidden-call` (é açúcar sintático sobre ele — a rota real `from → through → to` não é verificada, só citada na mensagem via `{through}`). |
-| `naming-convention` | `layer`, `require` | Tipos da camada `layer` devem obedecer `require: { suffix: "..." }` (documentado no ADR) ou `require: { prefix: "..." }` (suporte adicional do avaliador). |
-| `max-dependencies` | `layer`, `max`, `countBy` | Tipos da camada `layer` não podem ter mais que `max` dependências distintas, contadas por `countBy`: `constructor-parameters`, `fields` ou `all`. Limite inclusivo — contagem igual a `max` não reporta. |
-
-O schema JSON **não** trava `type` a estes 4 valores: tipos futuros são aceitos como extensão MINOR
-aditiva (ver versionamento abaixo) e só geram aviso em runtime se a versão instalada da lib não os
-reconhecer.
-
-### Severidades (ADR-001 D3)
-
-Os nomes em `severities:` são livres; os valores são restritos à escala que
-`dotnet_diagnostic.<ID>.severity` aceita no AnalyzerConfig — **nunca** `info`/`hidden`:
-
-| YAML (`severities:`) | AnalyzerConfig | `DiagnosticSeverity` |
-|---|---|---|
-| qualquer nome → `error` | `error` | `Error` |
-| qualquer nome → `warning` | `warning` | `Warning` |
-| qualquer nome → `suggestion` | `suggestion` | `Info` |
-| qualquer nome → `silent` | `silent` | `Hidden` |
-| qualquer nome → `none` | `none` | (suprimido) |
-
-A severidade efetiva vive no `.editorconfig`/`.globalconfig` gerado por `arch-rules gen`, não no
-YAML em runtime — isso dá override por projeto de graça (`.editorconfig` tem precedência sobre
-`.globalconfig`) e funciona com o ferramental .NET existente. Detalhes: [ADR-001, seção D3](ADR-001-motor-regras-arquiteturais.md#d3--níveis-de-análise).
-
-### Versionamento de schema (ADR-001 D4)
-
-- `schema: arch-rules/v1` é obrigatória.
-- **MAJOR** (`v1` → `v2`): quebra o arquivo inteiro. Analyzer que não suporta a major recusa o
-  arquivo e emite `ARCH9001` (error).
-- **MINOR** é implícito e aditivo: novos campos e novos `type` de regra não invalidam o arquivo. Um
-  `type` desconhecido para a versão instalada gera `ARCH9003` (warning) — regra ignorada, demais
-  regras continuam valendo.
-- A faixa `ARCH9xxx` é reservada a erros do próprio motor (schema inválido, camada inexistente,
-  tipo não resolvido, slot duplicado) e sempre habilitada por padrão.
-
-Detalhes completos e trade-offs: [ADR-001, seção D4](ADR-001-motor-regras-arquiteturais.md#d4--versionamento-de-schema).
-
-## Estrutura do repositório
-
-```
-src/
-  Arch.Analyzer/                 # netstandard2.0 — DiagnosticAnalyzer + pool de 512 descriptors
-                                  # (ARCH0001..ARCH0512) e faixa ARCH9xxx, ILayerResolver real,
-                                  # cache de ArchConfig por SourceText, RuleEvaluatorRegistry
-                                  # populado com os 4 avaliadores de Arch.Rules.
-  Arch.Analyzer.Contracts/       # netstandard2.0 — IRuleEvaluator/ILayerResolver, extraídos para
-                                  # projeto próprio para quebrar o ciclo Arch.Analyzer <-> Arch.Rules.
-                                  # Referencia só Arch.Config + Microsoft.CodeAnalysis.CSharp.
-  Arch.Config/                   # netstandard2.0, sem dependência de Roslyn — modelo (ArchConfig,
-                                  # LayerDefinition, LayerMatchCriterion, RuleDefinition),
-                                  # ArchConfigParser (YamlDotNet) e validação de schema.
-  Arch.Rules/                    # netstandard2.0 — um IRuleEvaluator por arquivo: os 4 tipos de
-                                  # regra do ADR-001 (forbidden-call, must-route-through,
-                                  # naming-convention, max-dependencies). Não depende de
-                                  # Arch.Analyzer.
-  Arch.Cli/                      # net10.0 — Fase 3: gerador de .globalconfig/lock file
-                                  # (arch-rules gen / arch-rules validate).
-tests/
-  Arch.Config.Tests/             # parser puro, sem Roslyn
-  Arch.Analyzer.Tests/           # harness (código + config) -> diagnósticos
-  Arch.Rules.Tests/              # testes dos 4 avaliadores
-  Arch.TestHarness/              # harness reutilizável de compilação in-memory
-  Arch.Benchmarks/                # esqueleto de regressão de performance
-  Arch.Spike.Consumer/            # artefato do spike da Fase 0, não faz parte da lib final
-  Arch.Spike.ControlAnalyzer/    # artefato do spike da Fase 0, idem
-build/
-  ilrepack.targets               # fusão + /internalize do parser YAML no assembly do analyzer
-docs/
-  schema/arch-rules.v1.json      # JSON Schema desta documentação
-.github/
-  workflows/ci.yml               # build+test+pack+smoke
-```
-
-`Arch.Config` e `Arch.Rules` são fundidos em `Arch.Analyzer.dll` no pack — a separação em projetos
-existe para testabilidade e paralelização entre trilhas de desenvolvimento, não para distribuição.
-
-## Documentação
-
-- [ADR-001](ADR-001-motor-regras-arquiteturais.md) — decisão de arquitetura, opções consideradas e
-  trade-offs.
-- [PLANO-implementacao.md](PLANO-implementacao.md) — plano de execução por fases, com gates de saída
-  e critérios de paralelização.
-- [`docs/schema/arch-rules.v1.json`](docs/schema/arch-rules.v1.json) — JSON Schema completo do
-  `arch-rules.yaml`.
+- [ADR-001](https://github.com/SamuelGFDias/rulekit/blob/main/ADR-001-motor-regras-arquiteturais.md) — decisão de arquitetura, alternativas e trade-offs.
+- [CHANGELOG](https://github.com/SamuelGFDias/rulekit/blob/main/CHANGELOG.md) — o que mudou em cada versão.
+- [CONTRIBUTING](https://github.com/SamuelGFDias/rulekit/blob/main/CONTRIBUTING.md) — estrutura do repositório, como compilar, testar, empacotar e medir performance.
+- [Issues](https://github.com/SamuelGFDias/rulekit/issues) e licença [MIT](https://github.com/SamuelGFDias/rulekit/blob/main/LICENSE).
