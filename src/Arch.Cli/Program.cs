@@ -19,6 +19,8 @@ namespace Arch.Cli
             return Run(args, Console.Out, Console.Error);
         }
 
+        private const string StrictOption = "--strict";
+
         /// <summary>Código impresso quando uma falha inesperada chega à rede de último recurso.</summary>
         public const string UnexpectedFailureCode = "ARCH9001";
 
@@ -71,6 +73,7 @@ namespace Arch.Cli
         {
             string yamlPath = null;
             string outDir = null;
+            var strict = false;
 
             for (var i = 1; i < args.Length; i++)
             {
@@ -83,6 +86,15 @@ namespace Arch.Cli
                     }
 
                     outDir = args[++i];
+                }
+                else if (args[i] == StrictOption)
+                {
+                    strict = true;
+                }
+                else if (args[i].StartsWith("--", StringComparison.Ordinal))
+                {
+                    error.WriteLine($"Opção desconhecida: '{args[i]}'.");
+                    return 1;
                 }
                 else if (yamlPath == null)
                 {
@@ -97,29 +109,64 @@ namespace Arch.Cli
 
             if (yamlPath == null)
             {
-                error.WriteLine("Uso: arch-rules gen <caminho-do-yaml> [--out <diretorio>]");
+                error.WriteLine("Uso: arch-rules gen <caminho-do-yaml> [--out <diretorio>] [--strict]");
                 return 1;
             }
 
-            return GenCommand.Run(yamlPath, outDir, output);
+            return GenCommand.Run(yamlPath, outDir, output, strict);
         }
 
         private static int RunValidate(string[] args, TextWriter output, TextWriter error)
         {
-            if (args.Length < 2)
+            string yamlPath = null;
+            var strict = false;
+
+            for (var i = 1; i < args.Length; i++)
             {
-                error.WriteLine("Uso: arch-rules validate <caminho-do-yaml>");
+                if (args[i] == StrictOption)
+                {
+                    strict = true;
+                }
+                else if (args[i].StartsWith("--", StringComparison.Ordinal))
+                {
+                    error.WriteLine($"Opção desconhecida: '{args[i]}'.");
+                    return 1;
+                }
+                else if (yamlPath == null)
+                {
+                    yamlPath = args[i];
+                }
+                else
+                {
+                    error.WriteLine($"Argumento inesperado: '{args[i]}'.");
+                    return 1;
+                }
+            }
+
+            if (yamlPath == null)
+            {
+                error.WriteLine("Uso: arch-rules validate <caminho-do-yaml> [--strict]");
                 return 1;
             }
 
-            return ValidateCommand.Run(args[1], output);
+            return ValidateCommand.Run(yamlPath, output, strict);
         }
 
         private static void PrintUsage(TextWriter writer)
         {
             writer.WriteLine("Uso:");
-            writer.WriteLine("  arch-rules gen <caminho-do-yaml> [--out <diretorio>]");
-            writer.WriteLine("  arch-rules validate <caminho-do-yaml>");
+            writer.WriteLine("  arch-rules gen <caminho-do-yaml> [--out <diretorio>] [--strict]");
+            writer.WriteLine("  arch-rules validate <caminho-do-yaml> [--strict]");
+            writer.WriteLine();
+            writer.WriteLine("Opções:");
+            writer.WriteLine("  --out <diretorio>  (gen) diretório de saída; padrão: ao lado do YAML.");
+            writer.WriteLine("  --strict           QUALQUER aviso (ARCH9003, ARCH9008, ARCH9005...) vira erro: saída 1.");
+            writer.WriteLine("                     Em 'gen', nada é gerado quando o --strict falha.");
+            writer.WriteLine();
+            writer.WriteLine("Códigos de saída:");
+            writer.WriteLine("  0  válido (avisos ARCH9003 não bloqueiam; ARCH9008 também não em 'gen').");
+            writer.WriteLine("  1  erro bloqueante; em 'validate', também ARCH9008 (regra malformada) e,");
+            writer.WriteLine("     com --strict, qualquer aviso.");
         }
     }
 }

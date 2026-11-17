@@ -79,6 +79,42 @@ rules:
             Assert.Contains(diagnostics, d => d.Id == "ARCH0007" && d.GetMessage().StartsWith("ACME-007"));
         }
 
+        // ---- Revisão M2: regra `enabled: false` não entra na validação de slot (espelho do CLI) ----
+
+        [Fact]
+        public async Task M2_DisabledRule_WithSlotOutsidePool_ProducesNoArch9002_SameVerdictAsCli()
+        {
+            var yaml = Layers + ForbiddenCall("ACME-001", "ARCH0001") + @"
+  - id: ACME-099
+    slot: ARCH0999
+    enabled: false
+    type: forbidden-call
+    from: Controller
+    to: Repository
+";
+            var diagnostics = await RunAsync(yaml);
+
+            Assert.DoesNotContain(diagnostics, d => d.Id == "ARCH9002");
+            Assert.Contains(diagnostics, d => d.Id == "ARCH0001");
+        }
+
+        [Fact]
+        public async Task M2_DisabledRule_ReusingSlotOfEnabledRule_IsNotDuplicate_SameVerdictAsCli()
+        {
+            var yaml = Layers + @"
+  - id: ACME-002
+    slot: ARCH0001
+    enabled: false
+    type: forbidden-call
+    from: Controller
+    to: Repository
+" + ForbiddenCall("ACME-001", "ARCH0001");
+            var diagnostics = await RunAsync(yaml);
+
+            Assert.DoesNotContain(diagnostics, d => d.Id == "ARCH9002");
+            Assert.Contains(diagnostics, d => d.Id == "ARCH0001" && d.GetMessage().StartsWith("ACME-001"));
+        }
+
         [Fact]
         public async Task Issue3_TypeWithDifferentCase_IsEvaluated_NotArch9003()
         {

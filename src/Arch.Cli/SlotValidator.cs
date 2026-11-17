@@ -9,7 +9,8 @@ namespace Arch.Cli
     /// Action Item #5, Opção C) — este validador não aloca nada, só confere que cada slot já
     /// declarado (a) casa com o formato `ARCH` + 4 dígitos, (b) está dentro do pool reservado ao
     /// consumidor (`ARCH0001`..`ARCH0512` — a faixa `ARCH9xxx` é reservada ao motor e nunca
-    /// alocável por configuração, ADR-001 D4) e (c) é único entre todas as regras.
+    /// alocável por configuração, ADR-001 D4) e (c) é único entre todas as regras HABILITADAS (regra `enabled: false` fica fora da validação, como no
+    /// analyzer).
     ///
     /// Formato, limite e normalização vêm de <see cref="SlotPool"/> (Arch.Config), o mesmo que
     /// Arch.Analyzer usa para decidir ARCH9002 em runtime — CLI e analyzer dão o mesmo veredito
@@ -29,6 +30,14 @@ namespace Arch.Cli
 
             foreach (var rule in rules)
             {
+                if (!rule.Enabled)
+                {
+                    // Paridade com o analyzer (ArchRulesAnalyzer pula `enabled: false` antes de olhar o
+                    // slot — ADR-001 D2): regra desligada não ocupa nem exige slot válido; o slot dela só
+                    // aparece no lock file, com `enabled: false`.
+                    continue;
+                }
+
                 var slot = rule.Slot;
 
                 // Mesma normalização do analyzer (SlotPool: trim, sem diferenciar caixa) — issue #6.

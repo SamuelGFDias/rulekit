@@ -129,12 +129,116 @@ rules:
 ");
             var output = new StringWriter();
 
-            ValidateCommand.Run(yamlPath, output);
+            var exitCode = ValidateCommand.Run(yamlPath, output);
 
             var text = output.ToString();
+            Assert.Equal(1, exitCode); // regra malformada é sempre erro do usuário (revisão M1)
             Assert.Contains("[ARCH9008]", text);
             Assert.Contains("ACME-020", text);
             Assert.Contains("countBy", text);
         }
+
+        // ---- Revisão M2: regra `enabled: false` não entra na validação de slot (paridade com o analyzer) ----
+
+        private const string DisabledRuleHeader = @"
+schema: arch-rules/v1
+layers:
+  Controller:
+    match:
+      - nameSuffix: Controller
+  Repository:
+    match:
+      - nameSuffix: Repository
+severities:
+  media: warning
+defaults:
+  severity: media
+rules:
+  - id: ACME-001
+    slot: ARCH0001
+    type: forbidden-call
+    from: Controller
+    to: Repository
+";
+
+        [Fact]
+        public void M2_DisabledRule_WithSlotOutsidePool_IsNotReported_AndLandsOnlyInLock()
+        {
+            var yamlPath = Path.Combine(_dir, "arch-rules.yaml");
+            File.WriteAllText(yamlPath, DisabledRuleHeader + @"  - id: ACME-099
+    slot: ARCH0999
+    enabled: false
+    type: forbidden-call
+    from: Controller
+    to: Repository
+");
+            var output = new StringWriter();
+
+            var exitCode = GenCommand.Run(yamlPath, null, output);
+
+            Assert.True(exitCode == 0, output.ToString());
+            var globalConfig = File.ReadAllText(Path.Combine(_dir, ".globalconfig"));
+            Assert.Contains("dotnet_diagnostic.ARCH0001.severity", globalConfig);
+            Assert.DoesNotContain("ARCH0999", globalConfig);
+            var lockFile = File.ReadAllText(Path.Combine(_dir, "arch-rules.lock.yaml"));
+            Assert.Contains("slot: ARCH0999", lockFile);
+            Assert.Contains("enabled: false", lockFile);
+        }
+
+        [Fact]
+        public void M2_DisabledRule_ReusingSlotOfEnabledRule_IsNotADuplicate()
+        {
+            var yamlPath = Path.Combine(_dir, "arch-rules.yaml");
+            File.WriteAllText(yamlPath, DisabledRuleHeader + @"  - id: ACME-002
+    slot: ARCH0001
+    enabled: false
+    type: forbidden-call
+    from: Controller
+    to: Repository
+");
+            var output = new StringWriter();
+
+            var exitCode = ValidateCommand.Run(yamlPath, output);
+
+            Assert.True(exitCode == 0, output.ToString());
+            Assert.DoesNotContain("ARCH9002", output.ToString());
+        }
+
+        [Fact]
+        public void M2_DisabledRule_WithInvalidFormatSlot_IsNotReported()
+        {
+            var errors = SlotValidator.Validate(new[] { DisabledRule("ACME-099", "slot-qualquer") });
+
+            Assert.Empty(errors);
+        }
+
+        [Fact]
+        public void M2_EnabledRule_AfterDisabledOneWithSameSlot_KeepsTheSlot()
+        {
+            // A desabilitada vem PRIMEIRO: não pode "ocupar" o slot e fazer a habilitada virar duplicata.
+            var errors = SlotValidator.Validate(new[] { DisabledRule("ACME-002", "ARCH0001"), Rule("ACME-001", "ARCH0001") });
+
+            Assert.Empty(errors);
+        }
+
+        [Fact]
+        public void M2_EnabledRule_WithSlotOutsidePool_IsStillReported()
+        {
+            var errors = SlotValidator.Validate(new[] { Rule("ACME-099", "ARCH0999") });
+
+            Assert.Single(errors);
+            Assert.Equal("ARCH9002", errors[0].Code);
+        }
+
+        private static RuleDefinition DisabledRule(string id, string slot)
+            => new RuleDefinition(
+                id,
+                slot,
+                "forbidden-call",
+                enabled: false,
+                severityName: null,
+                messageTemplate: null,
+                help: null,
+                extra: new Dictionary<string, string> { ["from"] = "Controller", ["to"] = "Repository" });
     }
 }

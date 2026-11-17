@@ -30,6 +30,16 @@ namespace Arch.Cli
 
             public bool Success => BlockingErrors.Count == 0;
 
+            /// <summary>
+            /// Um aviso que, por política, faz o comando falhar: ARCH9008 (regra malformada é sempre erro
+            /// do usuário) apenas em <c>validate</c>, e qualquer aviso com <c>--strict</c>. ARCH9003
+            /// (tipo desconhecido — pode ser de uma versão futura da lib) segue só como aviso.
+            /// </summary>
+            public static bool IsFatalWarning(CliDiagnostic warning, bool strict, bool failOnMalformedRule)
+            {
+                return strict || (failOnMalformedRule && warning.Code == "ARCH9008");
+            }
+
             public Result(
                 ArchConfig config,
                 IReadOnlyDictionary<string, string> resolvedSeverityByRuleId,

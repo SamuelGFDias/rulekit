@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 
 namespace Arch.Cli
 {
@@ -7,11 +8,12 @@ namespace Arch.Cli
     /// declarados no YAML (v1 não aloca nada — ADR-001 Action Item #5, Opção C), VALIDA que são
     /// únicos e dentro do pool, e MATERIALIZA a severidade efetiva num `.globalconfig` +
     /// `arch-rules.lock.yaml`. Qualquer erro bloqueante (schema, extends, slot, severidade) sai
-    /// com código de saída != 0 e não gera nenhum arquivo.
+    /// com código de saída != 0 e não gera nenhum arquivo. Avisos (ARCH9003/ARCH9008) não impedem a
+    /// geração, salvo com <c>--strict</c> (qualquer aviso vira erro e nada é gerado).
     /// </summary>
     public static class GenCommand
     {
-        public static int Run(string yamlPath, string outDir, TextWriter output)
+        public static int Run(string yamlPath, string outDir, TextWriter output, bool strict = false)
         {
             if (!File.Exists(yamlPath))
             {
@@ -21,16 +23,27 @@ namespace Arch.Cli
 
             var result = ConfigPipeline.Run(yamlPath);
 
-            foreach (var warning in result.Warnings)
+            // `gen` gera mesmo com avisos (inclusive ARCH9008, que só falha o `validate`); com
+            // `--strict`, qualquer aviso falha o comando e nada é gerado.
+            var fatalWarnings = result.Warnings
+                .Where(w => ConfigPipeline.Result.IsFatalWarning(w, strict, failOnMalformedRule: false))
+                .ToList();
+
+            foreach (var warning in result.Warnings.Except(fatalWarnings))
             {
                 output.WriteLine("AVISO " + warning);
             }
 
-            if (!result.Success)
+            if (!result.Success || fatalWarnings.Count > 0)
             {
                 foreach (var error in result.BlockingErrors)
                 {
                     output.WriteLine("ERRO " + error);
+                }
+
+                foreach (var warning in fatalWarnings)
+                {
+                    output.WriteLine("ERRO " + warning);
                 }
 
                 return 1;
