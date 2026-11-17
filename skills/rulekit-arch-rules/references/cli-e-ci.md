@@ -30,7 +30,7 @@ arch-rules -h | --help
 ```
 
 - `--out <diretorio>` (só `gen`): diretório de saída; padrão: ao lado do YAML.
-- `--strict`: **qualquer** aviso (`ARCH9003`, `ARCH9008`, `ARCH9005` do lock...) vira erro, saída 1. Em
+- `--strict`: **qualquer** aviso (`ARCH9003`, `ARCH9008`; em `validate` também o `ARCH9005` de lock divergente — `gen` não compara com o lock) vira erro, saída 1. Em
   `gen`, nada é gerado quando o `--strict` falha.
 - Opção desconhecida (`--xyz`) é erro, saída 1.
 

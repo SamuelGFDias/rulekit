@@ -242,7 +242,7 @@ não resolvida. Problemas que só descartam **uma regra** têm tratamento própr
 |---|---|---|
 | `ARCH9008` (campo ausente/inválido — regra malformada) | **erro, saída 1** | `AVISO`, gera e sai 0 |
 | `ARCH9003` (tipo desconhecido — pode ser de uma versão futura da lib) | `AVISO`, saída 0 | `AVISO`, gera e sai 0 |
-| qualquer aviso com `--strict` (inclui `ARCH9005`, lock divergente) | **erro, saída 1** | **erro, saída 1, nada é gerado** |
+| qualquer aviso com `--strict` (em `validate`, inclui o `ARCH9005` de lock divergente; `gen` não compara com o lock) | **erro, saída 1** | **erro, saída 1, nada é gerado** |
 
 Use `arch-rules validate --strict` no CI para não deixar passar nenhum aviso. `gen` escreve por padrão
 ao lado do YAML — onde o compilador descobre o `.globalconfig` sem configuração — e `--out` muda o

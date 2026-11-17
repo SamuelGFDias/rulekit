@@ -193,6 +193,18 @@ rules:
             Assert.True(File.Exists(Path.Combine(_dir, "out", ".globalconfig")));
         }
 
+        [Fact]
+        public void Gen_OutFollowedByAnotherOption_IsRejected_AndCreatesNoDirectory()
+        {
+            var yaml = WriteYaml(Header);
+            var (exit, text) = RunCli("gen", "--out", "--strict", yaml);
+
+            Assert.Equal(1, exit);
+            Assert.Contains("--out", text);
+            Assert.False(Directory.Exists(Path.Combine(Directory.GetCurrentDirectory(), "--strict")));
+            Assert.False(File.Exists(Path.Combine(_dir, ".globalconfig")));
+        }
+
         [Theory]
         [InlineData("--help")]
         [InlineData("-h")]

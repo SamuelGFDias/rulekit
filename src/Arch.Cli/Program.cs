@@ -79,7 +79,7 @@ namespace Arch.Cli
             {
                 if (args[i] == "--out")
                 {
-                    if (i + 1 >= args.Length)
+                    if (i + 1 >= args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal))
                     {
                         error.WriteLine("--out exige um valor (diretório de saída).");
                         return 1;
@@ -160,7 +160,8 @@ namespace Arch.Cli
             writer.WriteLine();
             writer.WriteLine("Opções:");
             writer.WriteLine("  --out <diretorio>  (gen) diretório de saída; padrão: ao lado do YAML.");
-            writer.WriteLine("  --strict           QUALQUER aviso (ARCH9003, ARCH9008, ARCH9005...) vira erro: saída 1.");
+            writer.WriteLine("  --strict           QUALQUER aviso vira erro: saída 1 (ARCH9003, ARCH9008; em 'validate'");
+            writer.WriteLine("                     também o ARCH9005 de lock divergente — 'gen' não compara com o lock).");
             writer.WriteLine("                     Em 'gen', nada é gerado quando o --strict falha.");
             writer.WriteLine();
             writer.WriteLine("Códigos de saída:");
