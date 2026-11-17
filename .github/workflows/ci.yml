@@ -183,7 +183,19 @@ jobs:
 
           $dst = Join-Path $env:RUNNER_TEMP 'dogfood-vs'
           Copy-Item 'tests/Arch.Dogfood/Arch.Dogfood.Sample' $dst -Recurse
-          Remove-Item (Join-Path $dst 'NuGet.Config')
+          # NuGet.Config próprio (feed local + nuget.org): o NuGet do VS não desescapa %3B em
+          # /p:RestoreSources, então as fontes vão por arquivo.
+          $feed = (Resolve-Path 'artifacts').Path
+          @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="local" value="$feed" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+          </configuration>
+          "@ | Set-Content (Join-Path $dst 'NuGet.Config') -Encoding utf8
           $csproj = Join-Path $dst 'Arch.Dogfood.Sample.csproj'
           # Fora do repo não há Central Package Management: VersionOverride vira Version.
           (Get-Content $csproj -Raw).Replace('VersionOverride=', 'Version=') | Set-Content $csproj -NoNewline
@@ -196,7 +208,6 @@ jobs:
           Write-Host '--- caminho do msbuild'
           (Get-Command msbuild).Source
 
-          $feed = (Resolve-Path 'artifacts').Path
           $proj = Join-Path $env:RUNNER_TEMP 'dogfood-vs\Arch.Dogfood.Sample.csproj'
           $log = Join-Path $env:RUNNER_TEMP 'dogfood-vs.log'
 
@@ -205,7 +216,6 @@ jobs:
             /p:TargetFramework=net8.0 `
             /p:ReportAnalyzer=true `
             "/p:RuleKitAnalyzerVersion=$env:RULEKIT_VERSION" `
-            "/p:RestoreSources=$feed%3Bhttps://api.nuget.org/v3/index.json" `
             2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { throw "msbuild falhou (exit $LASTEXITCODE)." }
 
@@ -257,7 +267,7 @@ jobs:
           ver="${pkg##*/RuleKit.Analyzer.}"
           ver="${ver%.nupkg}"
           test -n "$ver"
-          eng/perf/measure.sh --feed artifacts --version "$ver" --runs 7 --threshold 5 --work "$RUNNER_TEMP/perf"
+          eng/perf/measure.sh --feed artifacts --version "$ver" --runs 11 --threshold 5 --work "$RUNNER_TEMP/perf"
 
       - name: Logs de build da medição
         if: always()

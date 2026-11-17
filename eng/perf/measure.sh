@@ -6,10 +6,11 @@
 #   eng/perf/measure.sh --feed <dir-com-o-nupkg> --version <versão-do-RuleKit.Analyzer> \
 #       [--runs 5] [--threshold 5] [--work <dir>] [--modules 10] [--per-module 10]
 #
-# Métrica principal (gate): por execução, tempo de execução do RuleKit.Analyzer reportado pelo
-# próprio csc (-p:ReportAnalyzer=true, linha "Arch.Analyzer.ArchRulesAnalyzer" da tabela de
-# analyzers) dividido pelo tempo de parede do `dotnet build` completo; mediana de N execuções.
-# Wall-clock com/sem o analyzer é apenas informativo. Sai com 1 se a mediana passar do limite
+# Métrica principal (gate, definição do ADR: overhead no tempo de build): por execução, um par de
+# builds com e sem o analyzer, em ordem alternada; overhead = (parede com - parede sem) / parede sem;
+# gate = mediana dos pares. Informativo: tempo de CPU do RuleKit reportado pelo csc
+# (-p:ReportAnalyzer=true) dividido pela parede do build — é um teto pessimista, porque o analyzer
+# roda em paralelo à compilação e esse tempo não se soma 1:1 à parede. Sai com 1 se a mediana passar do limite
 # ou se alguma asserção de sanidade falhar (analyzer não rodou, AD0001, sem diagnósticos).
 set -euo pipefail
 export LC_ALL=C DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
@@ -72,21 +73,26 @@ echo "== warm-up (não medido): 1 build com e 1 sem o analyzer"
 build_once on "$WORK/warmup-on.log" >/dev/null
 build_once off "$WORK/warmup-off.log" >/dev/null
 
-ratios=() ons=() offs=() analyzers=()
+ratios=() shares=() ons=() offs=() analyzers=()
 for (( r = 1; r <= RUNS; r++ )); do
-  w_on=$(build_once on "$WORK/run$r-on.log")
-  w_off=$(build_once off "$WORK/run$r-off.log")
+  # Ordem alternada para não favorecer sistematicamente um dos lados (cache de disco, turbo).
+  if (( r % 2 )); then
+    w_on=$(build_once on "$WORK/run$r-on.log"); w_off=$(build_once off "$WORK/run$r-off.log")
+  else
+    w_off=$(build_once off "$WORK/run$r-off.log"); w_on=$(build_once on "$WORK/run$r-on.log")
+  fi
   a=$(rulekit_seconds "$WORK/run$r-on.log") || { echo "measure.sh: linha do ArchRulesAnalyzer ausente no relatório do csc (run $r) — o analyzer não rodou" >&2; exit 1; }
-  ratio=$(awk -v a="$a" -v w="$w_on" 'BEGIN { printf "%.4f", 100 * a / w }')
-  printf 'run %d: analyzer=%ss  build(com)=%ss  build(sem)=%ss  overhead=%s%%\n' "$r" "$a" "$w_on" "$w_off" "$ratio"
-  ratios+=("$ratio"); ons+=("$w_on"); offs+=("$w_off"); analyzers+=("$a")
+  ratio=$(awk -v a="$w_on" -v b="$w_off" 'BEGIN { printf "%.4f", 100 * (a - b) / b }')
+  share=$(awk -v a="$a" -v w="$w_on" 'BEGIN { printf "%.4f", 100 * a / w }')
+  printf 'run %d: build(com)=%ss  build(sem)=%ss  overhead=%s%%  (CPU do analyzer=%ss, %s%% da parede)\n' "$r" "$w_on" "$w_off" "$ratio" "$a" "$share"
+  ratios+=("$ratio"); shares+=("$share"); ons+=("$w_on"); offs+=("$w_off"); analyzers+=("$a")
 done
 
 med_ratio=$(printf '%s\n' "${ratios[@]}" | median)
+med_share=$(printf '%s\n' "${shares[@]}" | median)
 med_on=$(printf '%s\n' "${ons[@]}" | median)
 med_off=$(printf '%s\n' "${offs[@]}" | median)
 med_an=$(printf '%s\n' "${analyzers[@]}" | median)
-wall_delta=$(awk -v a="$med_on" -v b="$med_off" 'BEGIN { printf "%.2f", 100 * (a - b) / b }')
 
 # Sanidade: o analyzer realmente avaliou a política (diagnósticos ARCH0 presentes, 4 regras
 # distintas) e nunca falhou (AD0001).
@@ -109,17 +115,17 @@ summary=$(cat <<EOF
 
 | Métrica | Valor |
 |---|---|
-| **Overhead mediano (gate)** = tempo do RuleKit no csc / tempo total do build | **${med_ratio}%** (limite ${THRESHOLD}%) |
-| Tempo mediano do RuleKit reportado pelo csc | ${med_an} s |
+| **Overhead mediano (gate)** = mediana de (parede com - parede sem) / parede sem, por par | **${med_ratio}%** (limite ${THRESHOLD}%) |
 | Tempo mediano de build com o analyzer (parede) | ${med_on} s |
-| Tempo mediano de build sem o RuleKit (parede, informativo) | ${med_off} s |
-| Diferença de parede com/sem (informativo, ruído de ±1 s) | ${wall_delta}% |
+| Tempo mediano de build sem o RuleKit (parede) | ${med_off} s |
+| Tempo mediano de CPU do RuleKit reportado pelo csc (informativo) | ${med_an} s |
+| CPU do RuleKit / parede do build (informativo, teto pessimista) | ${med_share}% |
 | Execuções medidas / warm-up | ${RUNS} / 1 |
 | Solução sintética | ${types} arquivos .cs, ${lines} linhas, ${MODULES}x${PER_MODULE}x5 tipos |
 | Diagnósticos ARCH0 distintos / slots / AD0001 | ${diag_total} / ${diag_slots}/ ${ad0001} |
 | RuleKit.Analyzer | ${VERSION} |
 
-Por execução (analyzer s / build s): $(for (( i = 0; i < RUNS; i++ )); do printf '%s/%s ' "${analyzers[$i]}" "${ons[$i]}"; done)
+Por execução (com s / sem s): $(for (( i = 0; i < RUNS; i++ )); do printf '%s/%s ' "${ons[$i]}" "${offs[$i]}"; done)
 EOF
 )
 echo

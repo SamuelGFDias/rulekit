@@ -36,35 +36,34 @@ com símbolos e invocações visitados.
 
 ## Metodologia
 
-`measure.sh --feed <dir-com-o-nupkg> --version <versão> [--runs 7] [--threshold 5]`:
+`measure.sh --feed <dir-com-o-nupkg> --version <versão> [--runs 11] [--threshold 5]`:
 
 1. gera a solução, faz **1 restore** com o feed local e **1 warm-up** (um build com e um sem o RuleKit,
    não medidos: JIT, caches do disco, resolução de SDK);
-2. repete **N** vezes (CI: 7), em pares: build **com** o RuleKit e build **sem** ele, ambos
+2. repete **N** vezes (CI: 11), em pares: build **com** o RuleKit e build **sem** ele, em ordem alternada
+   a cada par (com→sem, sem→com) para não favorecer um lado, ambos
    `dotnet build -c Release --no-restore --no-incremental -p:UseSharedCompilation=false -p:ReportAnalyzer=true`.
    `--no-incremental` força recompilar; `UseSharedCompilation=false` evita que um servidor de compilação
    quente esconda o custo de iniciar o analyzer (o pior caso, que é o de um build frio no CI);
-3. **métrica principal (gate):** por execução, `tempo do RuleKit no csc / tempo de parede do build com o
-   RuleKit`, em %, e a **mediana** das N execuções. O tempo do RuleKit é a linha
-   `Arch.Analyzer.ArchRulesAnalyzer` da tabela que o csc imprime com `ReportAnalyzer=true` (visível com
-   `-v:d`). Falha (exit 1) se a mediana passar de 5%;
-4. **informativo:** tempo de parede mediano com e sem o RuleKit e a diferença percentual. Não é gate
-   porque o ruído do runner (±1 s em ~6 s) é do tamanho do efeito: no ambiente de referência a diferença
-   fica ora positiva, ora negativa;
+3. **métrica principal (gate):** por par, `(parede com − parede sem) / parede sem`, em %, e a **mediana**
+   dos N pares. É a definição do ADR ("overhead no tempo de build"). Falha (exit 1) se a mediana passar
+   de 5%;
+4. **informativo:** tempo de CPU do RuleKit que o csc reporta com `ReportAnalyzer=true` (linha
+   `Arch.Analyzer.ArchRulesAnalyzer`, visível com `-v:d`) e a razão contra a parede do build. É um teto
+   pessimista: o analyzer roda em paralelo à compilação, então esse tempo não se soma 1:1 à parede;
 5. **sanidade (também falha o job):** a linha do analyzer existe no relatório do csc (ele rodou), há
    diagnósticos `ARCH0` das 4 regras (avaliou a política) e nenhum `AD0001` (não falhou). Sem isso um
    overhead baixo poderia ser só um analyzer que não fez nada.
 
 O resultado vai para `$GITHUB_STEP_SUMMARY` (tabela) e os logs de build ficam no artefato `perf-logs`.
 
-### Por que "tempo do analyzer / tempo de build" e não só "build com − build sem"
+### Por que a mediana de pares de parede, e não "CPU do analyzer / parede"
 
-A diferença de parede entre dois builds de ~6 s tem ruído de mesma ordem que 5% (300 ms), então
-compará-los seria um gate instável. O csc mede o tempo do analyzer **por dentro**, sem o ruído de
-inicialização do `dotnet`/MSBuild/restore, e a razão contra o build inteiro responde diretamente "quanto
-do build é o RuleKit". É conservadora em dois sentidos: o `ReportAnalyzer` instrumenta o analyzer e
-encarece sua execução, e o tempo reportado é soma de CPU, que pode passar do tempo de parede quando
-analyzers rodam em paralelo.
+A primeira versão deste gate usava a razão CPU do analyzer / parede. No runner do GitHub (build de
+~1,9 s) ela deu 5,7% enquanto a diferença real de parede com/sem era ~0%: o csc soma tempo de CPU de um
+analyzer que roda concorrente com a compilação, e num build curto essa soma pesa mais contra a parede. A
+mediana de pares alternados absorve o ruído do runner (cada par roda em sequência, sob as mesmas
+condições) e mede o que o usuário sente. A razão de CPU continua no relatório como sinal de tendência.
 
 Para a baseline "sem o RuleKit", o projeto remove **só** o `RuleKit.Analyzer` da lista de analyzers do
 csc (`-p:PerfRuleKit=off`), mantendo os analyzers do SDK ligados nas duas medições. `RunAnalyzers=false`
@@ -72,24 +71,25 @@ removeria todos e atribuiria à lib o custo dos analyzers do SDK.
 
 ## Resultado de referência
 
-Máquina de desenvolvimento (ARM64, Linux, .NET SDK 10.0.404), `RuleKit.Analyzer 0.0.0-alpha.0.6`, 7 execuções:
+Máquina de desenvolvimento (ARM64, Linux, .NET SDK 10.0.404), `RuleKit.Analyzer 0.0.0-alpha.0.5`, 5 pares,
+com outra carga de build rodando na máquina:
 
 | Métrica | Valor |
 |---|---|
-| Overhead mediano (gate) | **3,10%** (limite 5%) |
-| Tempo mediano do RuleKit no csc | 0,183 s (faixa 0,14–0,28 s) |
-| Build mediano com / sem o RuleKit (parede) | 5,92 s / 5,93 s (diferença −0,2%, ruído) |
+| Overhead mediano (gate) | **1,82%** (limite 5%; pares de −2,2% a +18,8% — o outlier é ruído, a mediana absorve) |
+| Build mediano com / sem o RuleKit (parede) | 5,90 s / 5,87 s |
+| CPU do RuleKit no csc / parede (informativo) | 0,158 s / 2,67% |
 | Diagnósticos | 25 distintos, `ARCH0001`–`ARCH0004`, 0 `AD0001` |
 
 Os números do CI vão para o summary de cada execução e variam com o runner. A margem para o limite
-(≈2 pontos percentuais) não é grande: se o job do CI ficar instável, o remédio correto é aumentar `--runs`
+não é enorme: se o job do CI ficar instável, o remédio correto é aumentar `--runs`
 ou o tamanho da solução (`--modules`), não subir o limite sem decisão explícita.
 
 ## Rodar localmente
 
 ```bash
 dotnet pack src/Arch.Analyzer -c Release -o artifacts          # gera artifacts/RuleKit.Analyzer.<versão>.nupkg
-eng/perf/measure.sh --feed artifacts --version <versão> --runs 7 --work /tmp/rulekit-perf
+eng/perf/measure.sh --feed artifacts --version <versão> --runs 11 --work /tmp/rulekit-perf
 ```
 
 Para inspecionar a solução sem medir: `eng/perf/generate.sh /tmp/rulekit-perf-sol`.
