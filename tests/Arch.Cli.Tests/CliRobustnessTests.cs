@@ -81,6 +81,18 @@ rules:
         }
 
         [Fact]
+        public void Validate_AninhamentoExtremo_ViraArch9001Rapido_SemEstourarAPilha()
+        {
+            // Revisão B2: 100 mil `[` derrubavam o processo (StackOverflow no carregador da DOM).
+            var yamlPath = Write("fundo.yaml", "extends: " + new string('[', 100_000));
+
+            var (exitCode, text) = RunCli("validate", yamlPath);
+
+            AssertCleanArch9001(exitCode, text);
+            Assert.Contains("aninhamento", text);
+        }
+
+        [Fact]
         public void Gen_ExcecaoInesperada_ViraErroLimpoArch9001_SemStackTrace()
         {
             // `--out` apontando para um ARQUIVO existente: Directory.CreateDirectory lança

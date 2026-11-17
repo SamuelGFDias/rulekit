@@ -176,7 +176,8 @@ namespace Arch.Config.Internal
         /// <see cref="ParseExtends"/> — a extração não é duplicada, para que a forma aceita de
         /// `extends` (lista de escalares) tenha uma única fonte de verdade.
         ///
-        /// <para>Deliberadamente NÃO roda <see cref="YamlSubsetGuard"/> nem valida o resto do
+        /// <para>Deliberadamente NÃO roda as regras de subset do <see cref="YamlSubsetGuard"/> (só os limites de
+        /// tamanho/profundidade, para não estourar a pilha) nem valida o resto do
         /// schema: quem chama (Arch.Analyzer) precisa desta informação ANTES de ter a cadeia
         /// completa de textos, e a validação de verdade acontece depois, em
         /// <see cref="ArchConfigParser.Parse(IReadOnlyList{string})"/>, sobre a cadeia inteira. Um
@@ -188,6 +189,14 @@ namespace Arch.Config.Internal
         {
             try
             {
+                // Só os LIMITES (tamanho/profundidade) — sem as regras do subset: carregar a DOM de um
+                // texto com aninhamento extremo estoura a pilha (revisão B2), e isso derrubaria o
+                // processo do compilador antes de o Parse real poder reportar o ARCH9001.
+                if (YamlSubsetGuard.ValidateLimits(yamlText) != null)
+                {
+                    return Array.Empty<string>();
+                }
+
                 var stream = new YamlStream();
                 stream.Load(new StringReader(yamlText ?? string.Empty));
 
