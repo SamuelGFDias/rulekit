@@ -30,9 +30,10 @@ dotnet tool install -g RuleKit.Cli        # comando: arch-rules
   versão suportada — exige compilador do **SDK .NET 8+** ou **Visual Studio 2022 17.8+**. O CI também
   o carrega no MSBuild/csc (.NET Framework) do Visual Studio 18, sem `FileLoadException` nem `AD0001`.
   O projeto consumidor pode ter qualquer `TargetFramework` que o seu SDK compile.
-- **CLI (`RuleKit.Cli`):** exige o **runtime .NET 10 ou superior** (a ferramenta é compilada para
-  `net10.0`; `RollForward=Major` permite rodar em runtimes mais novos, nunca em mais antigos). Se o
-  seu SDK for mais antigo, a ferramenta não inicia — veja [Limitações](#limitações-conhecidas).
+- **CLI (`RuleKit.Cli`):** exige o **runtime .NET 8 ou superior**. A ferramenta é multi-target
+  (`net8.0;net10.0`): `dotnet tool install` escolhe o build compatível com o seu SDK (8/9 → `net8.0`,
+  10 → `net10.0`) e `RollForward=Major` permite rodar em runtimes mais novos, nunca em mais antigos.
+  Sem .NET 8+ instalado, a ferramenta não inicia — veja [Limitações](#limitações-conhecidas).
 
 ## Quickstart
 
@@ -120,7 +121,8 @@ YAML da Red Hat, por exemplo), coloque o modeline na primeira linha do arquivo:
 ```
 
 O YAML aceito é um subconjunto restrito: **sem anchors/aliases, sem multi-documento, sem tags
-customizadas**; chave desconhecida é erro, não silêncio.
+customizadas**; chave desconhecida é erro, não silêncio. Arquivos acima de **1 MiB** ou com mais de
+**64 níveis** de aninhamento (mapping/sequence) são rejeitados com `ARCH9001`.
 
 ### Chaves de nível raiz
 
@@ -227,17 +229,24 @@ de erros (`dotnet build -p:ErrorLog=build.sarif`).
 ## CLI: `arch-rules`
 
 ```text
-arch-rules validate <yaml>                  valida o schema, os slots e as severidades; não escreve nada
-arch-rules gen <yaml> [--out <diretório>]   o mesmo, e gera .globalconfig + arch-rules.lock.yaml
+arch-rules validate <yaml> [--strict]                  valida o schema, os slots e as severidades; não escreve nada
+arch-rules gen <yaml> [--out <diretório>] [--strict]   o mesmo, e gera .globalconfig + arch-rules.lock.yaml
 ```
 
 Ambos resolvem a cadeia de `extends` do disco e saem com código **1** quando algo bloqueia: YAML
-inválido (`ARCH9001`), slot inválido ou duplicado (`ARCH9002`), `extends` ausente/cíclico ou severidade
-não resolvida. Problemas que só descartam **uma regra** — `ARCH9003` (tipo desconhecido) e `ARCH9008`
-(campo ausente/inválido) — saem como linhas `AVISO [ARCH90xx] linha N, coluna M: ...` e **não**
-alteram o código de saída: no CI, falhe também quando a saída tiver `AVISO`. `gen` escreve por padrão ao lado do YAML — onde o compilador descobre o
-`.globalconfig` sem configuração — e `--out` muda o destino (nesse caso referencie o arquivo no
-`.csproj` como `GlobalAnalyzerConfigFiles`).
+inválido (`ARCH9001`), slot inválido ou duplicado entre regras habilitadas (`ARCH9002`; regra com
+`enabled: false` não entra nessa validação, como no analyzer), `extends` ausente/cíclico ou severidade
+não resolvida. Problemas que só descartam **uma regra** têm tratamento próprio:
+
+| Aviso | `validate` | `gen` |
+|---|---|---|
+| `ARCH9008` (campo ausente/inválido — regra malformada) | **erro, saída 1** | `AVISO`, gera e sai 0 |
+| `ARCH9003` (tipo desconhecido — pode ser de uma versão futura da lib) | `AVISO`, saída 0 | `AVISO`, gera e sai 0 |
+| qualquer aviso com `--strict` (inclui `ARCH9005`, lock divergente) | **erro, saída 1** | **erro, saída 1, nada é gerado** |
+
+Use `arch-rules validate --strict` no CI para não deixar passar nenhum aviso. `gen` escreve por padrão
+ao lado do YAML — onde o compilador descobre o `.globalconfig` sem configuração — e `--out` muda o
+destino (nesse caso referencie o arquivo no `.csproj` como `GlobalAnalyzerConfigFiles`).
 
 O `.globalconfig` gerado tem uma linha por regra habilitada:
 
@@ -249,7 +258,7 @@ dotnet_diagnostic.ARCH0001.severity = error
 
 O `arch-rules.lock.yaml` é o retrato `id → slot → tipo → severidade → enabled`, para revisar mudanças
 de política em code review. Se ele já existir e divergir do que seria gerado, o `validate` avisa
-(`AVISO [ARCH9005]`) pedindo para rodar `gen` de novo — comite os dois arquivos.
+(`AVISO [ARCH9005]`, ou erro com `--strict`) pedindo para rodar `gen` de novo — comite os dois arquivos.
 
 ## Limitações conhecidas
 
@@ -266,7 +275,7 @@ de política em code review. Se ele já existir e divergir do que seria gerado, 
   pode variar por arquivo) e `TreatWarningsAsErrors` (muda todos os warnings, não o slot).
 - **Escopo do que se detecta.** Reflexão, `dynamic` e service locators escapam; código gerado não é
   analisado. A lib previne deriva, não prova conformidade. `must-route-through` não verifica a rota.
-- **CLI exige runtime .NET 10+** (ver [Requisitos](#requisitos)).
+- **CLI exige runtime .NET 8+** (ver [Requisitos](#requisitos)).
 
 ## Mais
 

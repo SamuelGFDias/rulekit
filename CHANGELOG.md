@@ -46,8 +46,16 @@ Primeira versão publicada. Entrega o motor de regras arquiteturais completo (fa
   `.nupkg` local + instalação do `RuleKit.Cli` como dotnet tool), job `windows-vs` que carrega o analyzer
   no MSBuild/csc **.NET Framework** do Visual Studio e falha se aparecer `AD0001`, e job `perf` com o
   gate de < 5% de overhead de build (mediana de pares de parede, solução sintética em `eng/perf/`).
-- **Publicação** (`publish.yml`): tag `vX.Y.Z` na `main` → build, testes e pack → nuget.org por
-  **Trusted Publishing** (OIDC, sem API key no repositório) → GitHub Release com os pacotes.
+- **Publicação** (`publish.yml`): tag `vX.Y.Z` na `main` → job `build` (`contents: read`: build, testes e
+  pack) → job `publish` (sem checkout de código; é o único com `id-token: write`) → nuget.org por
+  **Trusted Publishing** (OIDC, sem API key no repositório) → GitHub Release com os pacotes. A Release é
+  idempotente: se a tag já tiver uma, os pacotes anexados são atualizados (`--clobber`) em vez de falhar.
+- **`arch-rules --strict`** (`validate` e `gen`): qualquer aviso (`ARCH9003`, `ARCH9008`, `ARCH9005`…) vira
+  erro com saída 1; em `gen`, nada é gerado nesse caso. `--help` documenta as opções e os códigos de saída.
+- **Limites de entrada do YAML:** arquivo acima de 1 MiB ou aninhamento de mapping/sequence acima de 64
+  níveis é rejeitado com `ARCH9001` (com linha/coluna), antes de carregar a DOM — um `[` repetido 100 mil
+  vezes não estoura mais a pilha. Exceções do scanner que não são `YamlException` (ex.: `...` seguido de
+  conteúdo) também viram `ARCH9001` com posição.
 - Documentação orientada a consumidor (`README.md`, também o `PackageReadmeFile` dos dois pacotes),
   `CONTRIBUTING.md` e este `CHANGELOG.md`.
 
@@ -62,6 +70,15 @@ Primeira versão publicada. Entrega o motor de regras arquiteturais completo (fa
   que os dois não divergem).
 - Diagnósticos do motor apontam a **linha/coluna da regra** no arquivo da cadeia de `extends` que a
   declarou.
+- **`arch-rules validate` sai com 1 quando há `ARCH9008`** (regra malformada é sempre erro do usuário);
+  `ARCH9003` (tipo desconhecido, possivelmente de uma versão futura) continua aviso com saída 0, e `gen`
+  continua gerando com avisos. Antes, `validate` saía 0 mesmo descartando uma regra.
+- **Regra `enabled: false` não entra na validação de slot** do CLI (formato, pool, duplicidade), em
+  paridade com o analyzer; o slot dela só aparece no lock file, com `enabled: false`.
+- **Caminho de `extends`** normalizado numa única função (`ExtendsChainResolver.NormalizeDeclaredPath`:
+  trim + `\` → `/`) usada por analyzer e CLI — `sub\base.yaml` e ` base.yaml ` resolvem nos dois, inclusive
+  em Linux.
+- **`RuleKit.Cli` multi-target `net8.0;net10.0`** (`RollForward=Major`): exige runtime .NET 8+ em vez de 10+.
 - O CLI converte falhas inesperadas em um `ERRO [ARCH9001]` limpo, sem stack trace. Contagem de
   dependências de `max-dependencies` normaliza genéricos por `OriginalDefinition`. Regras RS1035
   (`EnforceExtendedAnalyzerRules`) ligadas no analyzer.
@@ -77,7 +94,7 @@ Primeira versão publicada. Entrega o motor de regras arquiteturais completo (fa
 - Live analysis na IDE (Error List durante a digitação) não verificada; erros do motor saem no fim da
   compilação ([#1](https://github.com/SamuelGFDias/rulekit/issues/1), [#20](https://github.com/SamuelGFDias/rulekit/issues/20)).
 - `ARCH9005` ignora `.editorconfig` por árvore e `TreatWarningsAsErrors`.
-- O `RuleKit.Cli` exige runtime .NET 10 ou superior.
+- O `RuleKit.Cli` exige runtime .NET 8 ou superior.
 
 [Unreleased]: https://github.com/SamuelGFDias/rulekit/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/SamuelGFDias/rulekit/releases/tag/v0.1.0

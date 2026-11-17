@@ -6,7 +6,7 @@ decisão de arquitetura, no [ADR-001](ADR-001-motor-regras-arquiteturais.md).
 
 ## Pré-requisitos
 
-- **SDK .NET 10** — `global.json` fixa `10.0.100` com `rollForward: latestFeature`. O CLI é `net10.0`;
+- **SDK .NET 10** — `global.json` fixa `10.0.100` com `rollForward: latestFeature`. O CLI é multi-target `net8.0;net10.0` (o SDK 10 baixa o targeting pack do net8.0 no restore);
   as libs do analyzer são `netstandard2.0`.
 - Git com as **tags** buscadas (`git fetch --tags`): a versão dos pacotes vem de tags (ver
   [Versão e release](#versão-e-release)).
@@ -27,7 +27,7 @@ src/
                              SlotPool, SeverityVocabulary, ExtendsChainResolver.
   Arch.Rules/                netstandard2.0 — um IRuleEvaluator por arquivo: forbidden-call, must-route-through,
                              naming-convention, max-dependencies.
-  Arch.Cli/                  net10.0, dotnet tool (PackageId RuleKit.Cli, comando arch-rules): gen e validate.
+  Arch.Cli/                  net8.0;net10.0, dotnet tool (PackageId RuleKit.Cli, comando arch-rules): gen e validate.
 tests/
   Arch.Config.Tests/         parser/catálogo, sem Roslyn
   Arch.Analyzer.Tests/       harness (código + config) -> diagnósticos; pipeline completo do analyzer

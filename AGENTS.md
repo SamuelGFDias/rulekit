@@ -75,17 +75,18 @@ src/
   Arch.Rules/                    # netstandard2.0 — um IRuleEvaluator por arquivo: ForbiddenCall,
                                   # MustRouteThrough (herda do anterior), NamingConvention,
                                   # MaxDependencies. Referencia só Contracts + Config.
-  Arch.Cli/                      # net10.0, PackAsTool — PackageId RuleKit.Cli, comando arch-rules,
-                                  # RollForward=Major (só rola para runtimes MAIS NOVOS: exige .NET 10+).
-                                  # `gen <yaml> [--out <dir>]` e `validate <yaml>`: resolvem extends do
+  Arch.Cli/                      # net8.0;net10.0, PackAsTool — PackageId RuleKit.Cli, comando arch-rules,
+                                  # RollForward=Major (só rola para runtimes MAIS NOVOS: exige .NET 8+;
+                                  # o pack traz tools/net8.0/any e tools/net10.0/any).
+                                  # `gen <yaml> [--out <dir>] [--strict]` e `validate <yaml> [--strict]`: resolvem extends do
                                   # disco (ExtendsResolver = loader de disco sobre ExtendsChainResolver),
                                   # validam schema/slots/severidades e `gen` escreve .globalconfig e
                                   # arch-rules.lock.yaml. Sem dependência direta de YamlDotNet.
 tests/
-  Arch.Config.Tests/             # parser + catálogo, sem Roslyn — 72 testes
-  Arch.Analyzer.Tests/           # harness (código + config) -> diagnósticos — 80 testes
+  Arch.Config.Tests/             # parser + catálogo, sem Roslyn — 90 testes
+  Arch.Analyzer.Tests/           # harness (código + config) -> diagnósticos — 84 testes
   Arch.Rules.Tests/              # testes dos 4 avaliadores — 32 testes
-  Arch.Cli.Tests/                # testes do CLI (gen/validate) — 27 testes
+  Arch.Cli.Tests/                # testes do CLI (gen/validate) — 50 testes
   Arch.TestHarness/              # compilação in-memory reutilizável — 4 testes próprios
   Arch.Benchmarks/               # BenchmarkDotNet (memoização do LayerResolver, cache de config); só compila no CI
   Arch.Dogfood/                  # Arch.Dogfood.Sample consome o analyzer por .nupkg real (não
@@ -126,8 +127,8 @@ empacotado nos dois `.nupkg`: **só URLs absolutas** (links relativos quebram no
 ## 5. Convenções técnicas
 
 - **Target frameworks:** `netstandard2.0` para as libs do analyzer (`Arch.Analyzer`, `Arch.Config`,
-  `Arch.Rules`, `Arch.Analyzer.Contracts` — precisam rodar dentro do host do compilador). `net10.0`
-  para `Arch.Cli` (ferramenta externa, sem essa restrição) e para os testes. Roslyn fixado em 4.8.0
+  `Arch.Rules`, `Arch.Analyzer.Contracts` — precisam rodar dentro do host do compilador). `net8.0;net10.0`
+  para `Arch.Cli` (ferramenta externa, sem essa restrição) e `net10.0` para os testes. Roslyn fixado em 4.8.0
   (menor versão suportada: SDK .NET 8+ / VS 2022 17.8+).
 - **Versão dos pacotes:** MinVer a partir de tags `vX.Y.Z`; nunca fixar `<Version>` num csproj.
 - **Parser YAML:** YamlDotNet, fundido no assembly do analyzer via ILRepack `/internalize`, virando
@@ -150,8 +151,8 @@ reais, resolvedor único de `extends`, CI com Windows/VS e perf, publicação po
 README/CHANGELOG/CONTRIBUTING). O que falta é só o ato de release (seção 10): tag `v0.1.0` num commit
 da `main`.
 
-Gate verificado (`dotnet test RuleKit.sln -c Release`): **215 testes aprovados, 0 falhas** —
-`Arch.Config.Tests` 72 + `Arch.Analyzer.Tests` 80 + `Arch.Rules.Tests` 32 + `Arch.Cli.Tests` 27 +
+Gate verificado (`dotnet test RuleKit.sln -c Release`): **260 testes aprovados, 0 falhas** —
+`Arch.Config.Tests` 90 + `Arch.Analyzer.Tests` 84 + `Arch.Rules.Tests` 32 + `Arch.Cli.Tests` 50 +
 `Arch.TestHarness` 4.
 
 Pendências conhecidas (não bloqueiam a v0.1.0):
@@ -247,8 +248,15 @@ fixa contratos compartilhados (interfaces, trechos do ADR) no prompt de cada del
   verde não prova que o analyzer enxergou o arquivo.
 - **`.globalconfig`/lock gerados pelo CLI.** `gen` escreve por padrão ao lado do YAML (onde o
   compilador descobre `.globalconfig` sem configuração); só regras `enabled` entram. Sem `gen`, os
-  slots reportam o default do descriptor (`warning`). `validate` e `gen` tratam `ARCH9003`/`ARCH9008`
-  como `AVISO` (não bloqueante, exit 0) e erro de slot/`extends`/severidade como bloqueante (exit 1).
+  slots reportam o default do descriptor (`warning`). `gen` trata `ARCH9003`/`ARCH9008`
+  como `AVISO` (gera, exit 0); `validate` trata `ARCH9008` (regra malformada) como erro (exit 1) e
+  `ARCH9003` (pode ser tipo de versão futura) como `AVISO` (exit 0); `--strict` (nos dois) faz QUALQUER
+  aviso sair 1 (`gen` não gera nada). Erro de slot/`extends`/severidade é bloqueante (exit 1). O
+  `SlotValidator` ignora regras `enabled: false` (paridade com o analyzer). O caminho de cada `extends`
+  passa por `ExtendsChainResolver.NormalizeDeclaredPath` (trim + `\` → `/`) antes do combinador, nos dois lados.
+- **Limites do `YamlSubsetGuard`** (roda por eventos, antes do `YamlStream.Load`, também para o
+  `PeekExtends`): texto até 1 MiB e aninhamento de mapping/sequence até 64 níveis, senão `ARCH9001`
+  bloqueante com linha/coluna; exceções do scanner que não são `YamlException` também viram `ARCH9001`.
 - **Riscos em aberto para v2:** os erros do motor saem em `RegisterCompilationEndAction` (#20); a
   checagem de `type` mora agora no parser (catálogo) *e* no despacho do analyzer — manter os dois
   alinhados pelo teste acima.
@@ -265,9 +273,13 @@ manual) e o contorno por reflexão de `Arch.Benchmarks` foi eliminado. Nada pend
 2. Tag `vX.Y.Z` **num commit da `main`** (`git tag vX.Y.Z && git push origin vX.Y.Z`); o `publish.yml`
    recusa tag fora da `main`. O README empacotado é o do commit da tag — **comite a documentação antes
    de criar a tag**.
-3. `publish.yml` (disparado por `push` de tag `v*`): build + testes + pack; confere que
-   `RuleKit.Analyzer.<ver>.nupkg`, `RuleKit.Cli.<ver>.nupkg` e `.snupkg` têm a versão da tag (MinVer);
+3. `publish.yml` (disparado por `push` de tag `v*`), em **dois jobs**: `build` (`contents: read`; checkout,
+   build + testes + pack; confere que `RuleKit.Analyzer.<ver>.nupkg`, `RuleKit.Cli.<ver>.nupkg` e
+   `.snupkg` têm a versão da tag (MinVer); sobe os pacotes como artifact) e `publish` (`needs: build`;
+   `id-token: write` + `contents: write`; **sem checkout nem build** — só baixa o artifact):
    `NuGet/login@v1` (**Trusted Publishing**, usuário `samueldias21`, policy do nuget.org cadastrada para
    `SamuelGFDias/rulekit` + `publish.yml`, **sem `environment`** — declarar um no job faria o login
-   falhar); `dotnet nuget push artifacts/*.nupkg --skip-duplicate`; `gh release create` com os
-   pacotes. Sufixo na tag (`v1.0.0-rc.1`) = pré-lançamento.
+   falhar); `dotnet nuget push artifacts/*.nupkg --skip-duplicate`; Release idempotente (`gh release
+   create` ou, se a tag já tiver Release, `gh release upload --clobber`, sempre com `--repo`). Sufixo na
+   tag (`v1.0.0-rc.1`) = pré-lançamento. O `RuleKit.Cli` é multi-target (`net8.0;net10.0`): o pack traz
+   `tools/net8.0/any` e `tools/net10.0/any`; o SDK 10 baixa o targeting pack do net8.0 no restore.
