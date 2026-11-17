@@ -37,7 +37,7 @@
       "...Testing.XUnit" está deprecado e não é referenciado — Microsoft.CodeAnalysis.Testing
       já expõe Microsoft.CodeAnalysis.Testing.Verifiers.DefaultVerifier.
     -->
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" Version="1.1.4" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" />
 
     <!--
       Microsoft.CodeAnalysis.CSharp.Analyzer.Testing 1.1.4 só exige
@@ -46,7 +46,7 @@
       antiquíssima, que conflita em runtime com o Microsoft.CodeAnalysis 4.8.0 contra o qual
       Arch.Analyzer foi compilado (MSB3277). Pinado na mesma versão do analyzer sob teste.
     -->
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
     <!--
       YamlDotNet em RUNTIME para este projeto de teste. Não é uma dependência nova da lib: no
       pacote publicado ele vai fundido e internalizado dentro do Arch.Analyzer.dll (ILRepack), e
@@ -60,10 +60,10 @@
       o FileNotFoundException de carga do assembly era convertido em ARCH9001 pelo próprio
       analyzer — falha ruidosa, mas com mensagem enganosa ("YAML inválido").
     -->
-    <PackageReference Include="YamlDotNet" Version="13.1.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
-    <PackageReference Include="xunit" Version="2.9.2" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="YamlDotNet" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,37 @@
+<Project>
+
+  <!-- Propriedades comuns a TODOS os projetos do repositório. Metadados de pacote só têm efeito
+       nos projetos empacotáveis (Arch.Analyzer e Arch.Cli ligam IsPackable=true). -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+
+    <Authors>samueldias21</Authors>
+    <Company>samueldias21</Company>
+    <Copyright>Copyright (c) 2026 samueldias21</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/SamuelGFDias/rulekit</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/SamuelGFDias/rulekit</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>roslyn;analyzer;architecture;yaml;rules;arch-rules</PackageTags>
+
+    <!-- SourceLink já vem embutido no SDK (8+): só habilitamos a publicação da URL do repositório
+         e a incorporação de fontes não rastreadas. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+
+    <!-- Build determinístico (caminhos normalizados) só no CI. -->
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- Ninguém é empacotável por padrão; Arch.Analyzer e Arch.Cli ligam IsPackable=true. -->
+    <IsPackable>false</IsPackable>
+
+    <!-- Versão derivada de tags git `v<major>.<minor>.<patch>` — NÃO fixar <Version> em nenhum csproj. -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

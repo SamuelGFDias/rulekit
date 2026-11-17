@@ -7,13 +7,16 @@
     <EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
 
     <!-- Empacotamento de analyzer (ADR-001 §5, "Empacotamento") -->
-    <PackageId>Arch.Analyzer</PackageId>
-    <Version>0.1.0</Version>
-    <Description>Motor de regras arquiteturais configurável via YAML — Roslyn Analyzer (ADR-001).</Description>
+    <!-- PackageId público é RuleKit.Analyzer; AssemblyName/namespaces continuam Arch.Analyzer.
+         A versão vem do MinVer (tags git v*) — NÃO fixar <Version> aqui. -->
+    <PackageId>RuleKit.Analyzer</PackageId>
+    <IsPackable>true</IsPackable>
+    <Description>RuleKit.Analyzer: Roslyn Analyzer configurável que valida padrões arquiteturais em tempo de compilação a partir de um arquivo YAML (arch-rules.yaml), sem regras hardcoded e com override de severidade por regra via .editorconfig. A configurable Roslyn analyzer that enforces architecture rules declared in a YAML file at build time and live in the IDE.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
     <DevelopmentDependency>true</DevelopmentDependency>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
-    <NoPackageAnalysis>true</NoPackageAnalysis>
     <!-- NU5128: "não há dependência de lib para netstandard2.0" — esperado para analyzer-only
          package (IncludeBuildOutput=false). Não é um defeito a corrigir. -->
     <NoWarn>$(NoWarn);NU5128</NoWarn>
@@ -35,16 +38,16 @@
   <ItemGroup>
     <!-- Fixada na menor versão suportada, PrivateAssets=all (ADR-001 §5) — fornecida pelo
          host do compilador em runtime, não deve virar dependência nem ser fundida. -->
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
 
     <!-- Parser YAML (ADR-001 D1) — fundido e internalizado por build/ilrepack.targets, nunca
          distribuído como DLL própria. PrivateAssets=all + SuppressDependenciesWhenPacking
          garantem que ele não vaza como dependência no .nuspec do pacote. -->
-    <PackageReference Include="YamlDotNet" Version="13.1.0" PrivateAssets="all" />
+    <PackageReference Include="YamlDotNet" PrivateAssets="all" />
 
     <!-- Executa o merge/internalize durante o Pack, não no build (ver ILRepackTargetsFile acima
          e o bloco "POR QUE ESTE TARGET RODA SÓ NO PACK" em build/ilrepack.targets). -->
-    <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.46" PrivateAssets="all" />
+    <PackageReference Include="ILRepack.Lib.MSBuild.Task" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -70,10 +73,16 @@
 
          Item ESTÁTICO (diferente do <None> da DLL fundida, que é injetado em tempo de Pack por
          build/ilrepack.targets): este arquivo existe fisicamente no repositório e não depende de
-         nenhum passo de build. O PackagePath precisa ser exatamente build/Arch.Analyzer.targets —
+         nenhum passo de build. O PackagePath precisa ser exatamente build/RuleKit.Analyzer.targets —
          o NuGet só importa build/<PackageId>.(props|targets). -->
-    <None Include="$(MSBuildThisFileDirectory)../../build/Arch.Analyzer.targets"
-          Pack="true" PackagePath="build/Arch.Analyzer.targets" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)../../build/RuleKit.Analyzer.targets"
+          Pack="true" PackagePath="build/RuleKit.Analyzer.targets" Visible="false" />
+
+    <!-- README e avisos de terceiros na raiz do pacote (PackageReadmeFile=README.md). -->
+    <None Include="$(MSBuildThisFileDirectory)../../README.md"
+          Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)../../THIRD-PARTY-NOTICES.txt"
+          Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
   <!-- NÃO declarar aqui um <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" .../>.

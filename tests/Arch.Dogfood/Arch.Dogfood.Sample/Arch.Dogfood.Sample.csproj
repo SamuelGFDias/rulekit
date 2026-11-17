@@ -34,16 +34,28 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- .nupkg local produzido por `dotnet pack src/Arch.Analyzer -c Release -o tests/_local-nuget-feed`. -->
-    <PackageReference Include="Arch.Analyzer" Version="0.1.0" />
+    <!-- .nupkg local produzido por
+         `dotnet pack src/Arch.Analyzer -c Release -o tests/_local-nuget-feed`.
+
+         A VERSÃO vem do MinVer (tag git) e muda a cada commit, então NÃO há default fixo aqui:
+         passe a versão exata do .nupkg gerado, por exemplo
+           dotnet build tests/Arch.Dogfood/Arch.Dogfood.Sample -p:RuleKitAnalyzerVersion=0.0.0-alpha.0.5
+         (o nome do arquivo em tests/_local-nuget-feed é RuleKit.Analyzer.<versão>.nupkg).
+         O projeto usa Central Package Management; por isso a versão entra por VersionOverride. -->
+    <PackageReference Include="RuleKit.Analyzer" VersionOverride="$(RuleKitAnalyzerVersion)" />
   </ItemGroup>
+
+  <Target Name="ArchDogfoodRequireVersion" BeforeTargets="CollectPackageReferences;_GenerateRestoreGraph"
+          Condition="'$(RuleKitAnalyzerVersion)' == ''">
+    <Error Text="Defina a versão do pacote local: -p:RuleKitAnalyzerVersion=&lt;versão de tests/_local-nuget-feed/RuleKit.Analyzer.&lt;versão&gt;.nupkg&gt;" />
+  </Target>
 
   <!--
     Instrumentação da medição de overhead de build (Fase 4, trilha 4A).
 
-    `dotnet build -p:ArchAnalyzerEnabled=false` remove APENAS o Arch.Analyzer da lista de analyzers
+    `dotnet build -p:ArchAnalyzerEnabled=false` remove APENAS o RuleKit.Analyzer da lista de analyzers
     passada ao csc, deixando os analyzers do próprio SDK ligados nas duas medições. É a comparação
-    honesta: o custo atribuído à lib é a diferença entre "SDK + Arch.Analyzer" e "SDK sozinho".
+    honesta: o custo atribuído à lib é a diferença entre "SDK + RuleKit.Analyzer" e "SDK sozinho".
 
     Por que não `-p:RunAnalyzersDuringBuild=false`: aquele switch desliga TODOS os analyzers, e a
     diferença medida passaria a incluir o custo dos analyzers do SDK — superestimando a lib.
@@ -54,16 +66,8 @@
           Condition="'$(ArchAnalyzerEnabled)' == 'false'">
     <ItemGroup>
       <Analyzer Remove="@(Analyzer)"
-                Condition="$([System.String]::Copy('%(Identity)').Contains('arch.analyzer'))" />
+                Condition="$([System.String]::Copy('%(Identity)').Contains('rulekit.analyzer'))" />
     </ItemGroup>
   </Target>
-
-  <ItemGroup>
-    <!-- O analyzer procura um AdditionalFile chamado exatamente "arch-rules.yaml"
-         (ArchRulesAnalyzer.ConfigFileName). O pacote ainda não traz um build/*.props que faça essa
-         inclusão automaticamente — hoje é convenção manual do consumidor (ver Riscos do relatório
-         da trilha 4A). -->
-    <AdditionalFiles Include="arch-rules.yaml" />
-  </ItemGroup>
 
 </Project>

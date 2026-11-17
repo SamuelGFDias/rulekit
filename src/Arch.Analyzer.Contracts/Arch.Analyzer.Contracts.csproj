@@ -10,7 +10,7 @@
     <!-- Fixada na menor versão suportada, PrivateAssets=all (mesma versão usada em todo o
          repo) — fornecida pelo host do compilador em runtime, não deve virar dependência nem
          ser fundida. -->
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

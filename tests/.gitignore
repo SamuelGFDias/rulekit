@@ -1,9 +1,9 @@
-# Artefatos de build dos projetos de spike da Fase 0 sob tests/.
+# Artefatos de build dos projetos sob tests/.
 bin/
 obj/
 
 # Feed NuGet local gerado por `dotnet pack` (tests/_local-nuget-feed) — reproduzível a
-# partir de src/Arch.Analyzer e tests/Arch.Spike.ControlAnalyzer, não deve ser versionado.
+# partir de src/Arch.Analyzer, não deve ser versionado.
 _local-nuget-feed/*.nupkg
 
 # Saída de `dotnet run` do Arch.Benchmarks (BenchmarkDotNet).

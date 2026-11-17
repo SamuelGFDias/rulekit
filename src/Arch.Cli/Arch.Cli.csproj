@@ -15,8 +15,20 @@
          global quanto local ao repo via manifesto, sem exigir que o consumidor clone a lib). -->
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>arch-rules</ToolCommandName>
-    <PackageId>Arch.Cli</PackageId>
+    <PackageId>RuleKit.Cli</PackageId>
+    <IsPackable>true</IsPackable>
+    <Description>RuleKit.Cli (arch-rules): ferramenta de linha de comando que valida o arch-rules.yaml e gera o .globalconfig e o lock file (id → slot → severidade) do RuleKit. Command-line tool that validates arch-rules.yaml and generates the .globalconfig and lock file for RuleKit.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Roda também em runtimes mais novos que o net10.0 de compilação. -->
+    <RollForward>Major</RollForward>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="../../THIRD-PARTY-NOTICES.txt" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Precisa de Arch.Config.ArchConfigParser (overload público que resolve `extends` já
@@ -31,7 +43,7 @@
          ExtendsResolver.cs) — não há aqui a restrição de "nunca DLL separada" do ADR-001 D1, que
          é específica do analyzer hospedado dentro do compilador (roslyn#41421); o CLI é um
          executável .NET comum. -->
-    <PackageReference Include="YamlDotNet" Version="13.1.0" />
+    <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
   <!--

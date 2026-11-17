@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+    <PackageReference Include="BenchmarkDotNet" />
 
     <!--
       BenchmarkDotNet 0.14.0 traz Microsoft.CodeAnalysis.Common 4.1.0 como dependência
@@ -20,7 +20,7 @@
       com a 4.8.0 usada por Arch.Analyzer. Pin explícito na mesma versão do analyzer sob
       benchmark — mesmo padrão de tests/Arch.Analyzer.Tests e tests/Arch.TestHarness.
     -->
-    <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="4.8.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Common" />
 
     <!--
       Mesmo problema do Common acima, mas para o assembly Microsoft.CodeAnalysis.CSharp
@@ -32,7 +32,7 @@
       binária entre 4.1.0 e 4.8.0 (TypeLoadException em CSharpCompilation.GetSymbolInternal)
       assim que o host tenta carregar Arch.Benchmarks.dll.
     -->
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
 
     <!--
       src/Arch.Config/Arch.Config.csproj (netstandard2.0, sem PrivateAssets/CopyLocalLockFileAssemblies)
@@ -47,7 +47,7 @@
       nunca vira dependência do pacote publicado (isso é problema de Arch.Analyzer, não deste
       projeto de teste).
     -->
-    <PackageReference Include="YamlDotNet" Version="13.1.0" />
+    <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
   <ItemGroup>

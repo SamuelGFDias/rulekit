@@ -1,5 +1,5 @@
 <!--
-  Arch.Analyzer.targets — empacotado em `build/Arch.Analyzer.targets` dentro do .nupkg.
+  RuleKit.Analyzer.targets — empacotado em `build/RuleKit.Analyzer.targets` dentro do .nupkg.
 
   O SDK do NuGet importa automaticamente `build/<PackageId>.targets` em QUALQUER projeto que
   instale o pacote via PackageReference (o nome do arquivo PRECISA ser exatamente o PackageId).

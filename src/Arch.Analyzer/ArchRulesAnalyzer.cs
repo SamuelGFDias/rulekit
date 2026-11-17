@@ -33,7 +33,7 @@ namespace Arch.Analyzer
     /// <para><b><c>extends:</c> (ADR-001 D2):</b> a cadeia é resolvida aqui, contra
     /// <c>context.Options.AdditionalFiles</c> e SÓ contra eles — um analyzer não pode fazer I/O de
     /// disco (RS1035), então o que não foi passado pelo MSBuild simplesmente não existe para ele. O
-    /// <c>build/Arch.Analyzer.targets</c> do pacote inclui por convenção <c>arch-rules.yaml</c> e
+    /// <c>build/RuleKit.Analyzer.targets</c> do pacote inclui por convenção <c>arch-rules.yaml</c> e
     /// <c>arch-rules.*.yaml</c> do diretório do projeto; um `extends` fora dessa convenção vira
     /// <c>ARCH9006</c> (warning, NÃO bloqueante — ver <see cref="ResolveChain"/>).</para>
     /// </summary>
