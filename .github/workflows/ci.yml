@@ -154,9 +154,15 @@ jobs:
   # SupportedDiagnostics por sessão). Isso exige a IDE e segue como verificação manual na issue #1.
   #
   # Consumidor: uma CÓPIA do dogfood fora do repositório. Fora dele não valem o global.json
-  # (10.0.100) nem o Central Package Management, e o MSBuild do VS 2022 (17.x) escolhe sozinho o SDK
+  # (10.0.100) nem o Central Package Management, e o MSBuild do VS escolhe sozinho o SDK
   # que ele suporta. Por isso o TargetFramework é rebaixado para net8.0 (sem impacto: o que se
   # testa é o host do compilador, não o runtime do consumidor).
+  #
+  # RoslynCompilerType=Framework: desde o desacoplamento VS × .NET SDK, um projeto SDK-style
+  # buildado pelo MSBuild do VS usa por padrão o csc do .NET SDK (Roslyn/bincore, host .NET Core)
+  # quando DOTNET_HOST_PATH está definido — constatado no primeiro run deste job. A propriedade força
+  # o compilador do próprio VS (MSBuild/Current/Bin/Roslyn/csc.exe, .NET Framework), que é o host
+  # que a issue #1 pede. O SDK emite um aviso de depreciação (NETSDK) para esse valor; é esperado.
   windows-vs:
     name: Smoke no host .NET Framework (MSBuild do Visual Studio)
     needs: build-test
@@ -215,6 +221,7 @@ jobs:
             /p:Configuration=Release `
             /p:TargetFramework=net8.0 `
             /p:ReportAnalyzer=true `
+            /p:RoslynCompilerType=Framework `
             "/p:RuleKitAnalyzerVersion=$env:RULEKIT_VERSION" `
             2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { throw "msbuild falhou (exit $LASTEXITCODE)." }
@@ -222,12 +229,12 @@ jobs:
           $lines = Get-Content $log
 
           # Qual compilador rodou? Deve ser o Roslyn do Visual Studio (csc.exe em .NET Framework).
-          $csc = $lines | ForEach-Object { [regex]::Match($_, '[A-Za-z]:\\[^"\s]*\\csc\.exe').Value } |
+          $csc = $lines | ForEach-Object { [regex]::Match($_, '[A-Za-z]:\\[^"]*?\\csc\.exe(?= /noconfig)').Value } |
                  Where-Object { $_ } | Select-Object -First 1
           Write-Host "--- csc usado: $csc"
           if (-not $csc) {
-            Write-Warning 'Caminho do csc.exe não encontrado no log; a prova do host fica incompleta.'
-          } elseif ($csc -match '\\dotnet\\sdk\\') {
+            throw 'Caminho do csc.exe não encontrado no log: não dá para provar qual host compilou.'
+          } elseif ($csc -match '\\dotnet\\sdk\\' -or $csc -notmatch '\\Microsoft Visual Studio\\') {
             throw "O build usou o csc do .NET SDK ($csc) e não o do Visual Studio: o job não prova nada sobre o host .NET Framework."
           }
 
