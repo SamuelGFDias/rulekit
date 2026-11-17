@@ -10,20 +10,19 @@ namespace Arch.Rules
     /// <see cref="ForbiddenCallEvaluator"/>: MESMA detecção (`from`/`to`), a única diferença é que
     /// `through` alimenta a mensagem (e, no futuro, um Code Fix — fora de escopo na Fase 2).
     ///
-    /// <para><b>Formato de <c>through</c> em <see cref="RuleDefinition.Extra"/>.</b> Confirmado
-    /// contra <c>Arch.Config/Internal/ArchConfigDocumentParser.cs</c> (<c>StringifyNode</c>):
-    /// `through` é uma <c>YamlSequenceNode</c> no YAML (ex.: <c>through: [Service]</c>), e o parser
-    /// serializa a sequência com <c>string.Join(",", ...)</c> — SEM espaço após a vírgula. Uma lista
-    /// de um item vira <c>Extra["through"] = "Service"</c>; uma lista de dois itens viraria
-    /// <c>"Service,Outro"</c>. Este avaliador não precisa desmembrar essa string: ela é usada
-    /// literalmente como valor do placeholder <c>{through}</c> na mensagem, herdado de graça de
-    /// <see cref="ForbiddenCallEvaluator.ExpandTemplate"/> (que resolve qualquer chave de
-    /// <see cref="RuleDefinition.Extra"/> que não seja `from`/`to`/`symbol`/`id`).</para>
+    /// <para><b>Formato de <c>through</c>.</b> O catálogo (<see cref="RuleTypeCatalog"/>) declara
+    /// `through` como lista opcional (ex.: <c>through: [Service]</c>); em
+    /// <see cref="RuleDefinition.Properties"/> ela chega tipada, e na forma texto
+    /// (<see cref="RuleDefinition.GetString"/>/<see cref="RuleDefinition.Extra"/>) é serializada com
+    /// <c>string.Join(",", ...)</c> — SEM espaço após a vírgula (<c>"Service,Outro"</c>). Este
+    /// avaliador usa essa forma texto literalmente como valor do placeholder <c>{through}</c>,
+    /// herdado de <see cref="ForbiddenCallEvaluator.ExpandTemplate"/> (que resolve qualquer campo da
+    /// regra que não seja `from`/`to`/`symbol`/`id`).</para>
     /// </summary>
     public class MustRouteThroughEvaluator : ForbiddenCallEvaluator
     {
         /// <summary>Valor de `rules[].type` no YAML tratado por esta classe.</summary>
-        public new const string TypeName = "must-route-through";
+        public new const string TypeName = RuleTypeNames.MustRouteThrough;
 
         public override string RuleType
         {

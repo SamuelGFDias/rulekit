@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Globalization;
+using Arch.Config;
 using Microsoft.CodeAnalysis;
 
 namespace Arch.Analyzer
@@ -35,9 +35,7 @@ namespace Arch.Analyzer
         internal const string Category = "Architecture";
 
         /// <summary>Tamanho do pool (ADR-001 §3: "512 cobre qualquer política realista").</summary>
-        internal const int SlotCount = 512;
-
-        private const string SlotPrefix = "ARCH";
+        internal const int SlotCount = SlotPool.Count;
 
         /// <summary>
         /// Formato de mensagem de TODO descriptor desta classe. É sempre um único argumento: a
@@ -49,8 +47,6 @@ namespace Arch.Analyzer
 
         /// <summary>Slots do pool na ordem ARCH0001..ARCH0512 (índice 0 = ARCH0001).</summary>
         private static readonly ImmutableArray<DiagnosticDescriptor> Slots;
-
-        private static readonly ImmutableDictionary<string, DiagnosticDescriptor> SlotsById;
 
         private static readonly ImmutableDictionary<string, DiagnosticDescriptor> EngineById;
 
@@ -88,6 +84,13 @@ namespace Arch.Analyzer
         internal static readonly DiagnosticDescriptor Arch9007;
 
         /// <summary>
+        /// ARCH9008 — regra de `type` conhecido com campo obrigatório ausente, chave que o tipo não
+        /// aceita ou valor inválido (issue #5). Reportado pelo parser (Arch.Config); a regra é
+        /// ignorada e as demais continuam valendo.
+        /// </summary>
+        internal static readonly DiagnosticDescriptor Arch9008;
+
+        /// <summary>
         /// Tudo que o analyzer pode reportar: os 512 slots + a faixa ARCH9xxx. É exatamente o que
         /// <see cref="Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer.SupportedDiagnostics"/>
         /// devolve — imutável e computada uma única vez.
@@ -97,11 +100,10 @@ namespace Arch.Analyzer
         static ArchDiagnostics()
         {
             var slots = ImmutableArray.CreateBuilder<DiagnosticDescriptor>(SlotCount);
-            var slotsById = ImmutableDictionary.CreateBuilder<string, DiagnosticDescriptor>(StringComparer.OrdinalIgnoreCase);
 
             for (var number = 1; number <= SlotCount; number++)
             {
-                var id = SlotPrefix + number.ToString("D4", CultureInfo.InvariantCulture);
+                var id = SlotPool.Format(number);
                 var descriptor = new DiagnosticDescriptor(
                     id: id,
                     title: "Violação de regra arquitetural (slot " + id + ")",
@@ -116,11 +118,9 @@ namespace Arch.Analyzer
                         ".editorconfig/.globalconfig, nunca deste descriptor. Slot sem regra vinculada nunca reporta nada.");
 
                 slots.Add(descriptor);
-                slotsById.Add(id, descriptor);
             }
 
             Slots = slots.MoveToImmutable();
-            SlotsById = slotsById.ToImmutable();
 
             Arch9001 = CreateEngineDescriptor(
                 id: "ARCH9001",
@@ -193,6 +193,16 @@ namespace Arch.Analyzer
                     "de profundidade do resolvedor. O ramo problemático é cortado — sem isso a resolução seria " +
                     "infinita — e as demais camadas continuam valendo. Não é bloqueante.");
 
+            Arch9008 = CreateEngineDescriptor(
+                id: "ARCH9008",
+                title: "Regra com campo ausente, desconhecido ou inválido",
+                defaultSeverity: DiagnosticSeverity.Warning,
+                description:
+                    "A regra tem um `type` suportado, mas falta um campo obrigatório desse tipo, declara uma chave que " +
+                    "o tipo não aceita ou traz um valor inválido (ex.: `max` não inteiro, `countBy` fora dos valores " +
+                    "aceitos). A regra é ignorada — de forma ruidosa, nunca silenciosa — e as demais continuam valendo " +
+                    "(ADR-001 D4).");
+
             EngineById = ImmutableDictionary.CreateRange(
                 StringComparer.OrdinalIgnoreCase,
                 new[]
@@ -204,6 +214,7 @@ namespace Arch.Analyzer
                     new KeyValuePair<string, DiagnosticDescriptor>(Arch9005.Id, Arch9005),
                     new KeyValuePair<string, DiagnosticDescriptor>(Arch9006.Id, Arch9006),
                     new KeyValuePair<string, DiagnosticDescriptor>(Arch9007.Id, Arch9007),
+                    new KeyValuePair<string, DiagnosticDescriptor>(Arch9008.Id, Arch9008),
                 });
 
             // Ordem explícita (não a de EngineById, que é um dicionário) para que SupportedDiagnostics
@@ -215,7 +226,8 @@ namespace Arch.Analyzer
                 .Add(Arch9004)
                 .Add(Arch9005)
                 .Add(Arch9006)
-                .Add(Arch9007);
+                .Add(Arch9007)
+                .Add(Arch9008);
         }
 
         private static DiagnosticDescriptor CreateEngineDescriptor(
@@ -241,15 +253,18 @@ namespace Arch.Analyzer
         /// estiver fora do pool. NUNCA construa um DiagnosticDescriptor em runtime a partir do YAML:
         /// o ID não estaria em SupportedDiagnostics e o diagnóstico viraria AD0001 (ADR-001 §1).
         /// </summary>
+        /// <remarks>Normalização (trim, sem diferenciar caixa) e limite do pool vêm de
+        /// <see cref="SlotPool"/> — a mesma regra que o CLI aplica (issue #6).</remarks>
         internal static bool TryGetSlot(string slotId, out DiagnosticDescriptor descriptor)
         {
-            if (string.IsNullOrWhiteSpace(slotId))
+            if (!SlotPool.TryParse(slotId, out var number))
             {
                 descriptor = null;
                 return false;
             }
 
-            return SlotsById.TryGetValue(slotId.Trim(), out descriptor);
+            descriptor = Slots[number - 1];
+            return true;
         }
 
         /// <summary>

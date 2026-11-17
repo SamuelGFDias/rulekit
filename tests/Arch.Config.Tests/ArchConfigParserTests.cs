@@ -187,8 +187,13 @@ layers: {}
             Assert.True(error.IsBlocking);
         }
 
+        /// <summary>
+        /// Contrato revisto (issues #2/#5/#17): chave desconhecida para um `type` conhecido não
+        /// derruba mais o arquivo inteiro (era ARCH9001 bloqueante) — vira ARCH9008 não bloqueante e
+        /// só a regra é descartada. Chave desconhecida no nível raiz/camada continua ARCH9001.
+        /// </summary>
         [Fact]
-        public void UnknownKeyInsideRule_IsBlocking()
+        public void UnknownKeyInsideRule_IsNonBlockingArch9008_AndRuleIsExcluded()
         {
             const string yaml = @"
 schema: arch-rules/v1
@@ -196,14 +201,36 @@ rules:
   - id: ACME-001
     slot: ARCH0001
     type: forbidden-call
+    from: Controller
+    to: Repository
     foo: bar
 ";
             var result = ArchConfigParser.Parse(yaml);
 
-            Assert.Null(result.Config);
+            Assert.NotNull(result.Config);
+            Assert.Empty(result.Config.Rules);
             var error = Assert.Single(result.Errors);
-            Assert.Equal("ARCH9001", error.Code);
-            Assert.True(error.IsBlocking);
+            Assert.Equal("ARCH9008", error.Code);
+            Assert.False(error.IsBlocking);
+            Assert.Contains("'foo'", error.Message);
+        }
+
+        [Fact]
+        public void UnknownKeyAtRootOrLayer_IsStillBlockingArch9001()
+        {
+            foreach (var yaml in new[]
+            {
+                "schema: arch-rules/v1\nfoo: bar\n",
+                "schema: arch-rules/v1\nlayers:\n  Api:\n    match:\n      - nameSuffix: Api\n    foo: bar\n",
+            })
+            {
+                var result = ArchConfigParser.Parse(yaml);
+
+                Assert.Null(result.Config);
+                var error = Assert.Single(result.Errors);
+                Assert.Equal("ARCH9001", error.Code);
+                Assert.True(error.IsBlocking);
+            }
         }
 
         [Fact]

@@ -194,6 +194,46 @@ namespace Acme.Domain
             Assert.Contains("7", diagnostic.GetMessage());
         }
 
+        /// <summary>
+        /// Issue #17 (B2): o avaliador lê os campos tipados de <see cref="RuleDefinition.Properties"/>
+        /// (como o parser os entrega: `max` inteiro), não só o texto de <c>Extra</c>.
+        /// </summary>
+        [Fact]
+        public async Task PropriedadesTipadas_DoParser_SaoLidasPeloAvaliador()
+        {
+            const string source = @"
+namespace Acme.Domain
+{
+    public class OrderService
+    {
+        public OrderService(Dep1 a, Dep2 b, Dep3 c) { }
+    }
+
+    public class Dep1 { } public class Dep2 { } public class Dep3 { }
+}";
+            var rule = RuleDefinition.FromProperties(
+                "ACME-004",
+                "ARCH0004",
+                RuleTypeNames.MaxDependencies,
+                enabled: true,
+                severityName: "media",
+                messageTemplate: null,
+                help: null,
+                properties: new Dictionary<string, RulePropertyValue>
+                {
+                    [RuleFieldNames.Layer] = RulePropertyValue.FromScalar(ServiceLayer),
+                    [RuleFieldNames.Max] = RulePropertyValue.FromInteger(2),
+                    [RuleFieldNames.CountBy] = RulePropertyValue.FromScalar(RuleFieldValues.CountByConstructorParameters),
+                });
+
+            var diagnostics = await RunAsync(source, rule, new FakeLayerResolver("OrderService"));
+
+            var diagnostic = Assert.Single(diagnostics);
+            Assert.Equal("ARCH0004", diagnostic.Id);
+            Assert.Contains("3", diagnostic.GetMessage());
+            Assert.Contains("2", diagnostic.GetMessage());
+        }
+
         [Fact]
         public async Task ConstructorParameters_ExatamenteNoMax_NaoReporta()
         {

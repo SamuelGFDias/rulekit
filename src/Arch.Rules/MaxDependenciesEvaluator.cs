@@ -11,8 +11,8 @@ namespace Arch.Rules
     /// Avaliador do tipo `max-dependencies` (ADR-001 §4 D2): limita quantas dependências um tipo de
     /// uma camada pode ter, contadas conforme `countBy` (`constructor-parameters`, `fields` ou
     /// `all`). Usa <see cref="ILayerResolver.IsInLayer"/> para restringir a checagem à camada
-    /// declarada em `rule.Extra["layer"]` e reporta no slot pré-declarado quando a contagem excede
-    /// `rule.Extra["max"]`.
+    /// declarada no campo `layer` e reporta no slot pré-declarado quando a contagem excede
+    /// o campo `max`.
     ///
     /// <para><b>Decisões de design não detalhadas pelo ADR (documentadas aqui, não no ADR):</b></para>
     /// <list type="bullet">
@@ -43,8 +43,8 @@ namespace Arch.Rules
     /// </item>
     /// <item>
     /// <b>`countBy` desconhecido</b>: a regra não reporta nada. Validar que `countBy` é um dos
-    /// três valores aceitos é responsabilidade do schema (Arch.Config/1A), não deste avaliador —
-    /// mesmo raciocínio do `ARCH9003` para `type` desconhecido (AGENTS.md §8).
+    /// três valores aceitos é responsabilidade do schema: o parser descarta a regra com ARCH9008
+    /// (valores vindos de <see cref="RuleTypeCatalog"/>); o retorno mudo aqui é só defensivo.
     /// </item>
     /// <item>
     /// <b>Limite inclusivo.</b> `max: N` significa "no máximo N", não "menos que N": contagem
@@ -55,11 +55,14 @@ namespace Arch.Rules
     /// </summary>
     public sealed class MaxDependenciesEvaluator : IRuleEvaluator
     {
-        private const string CountByConstructorParameters = "constructor-parameters";
-        private const string CountByFields = "fields";
-        private const string CountByAll = "all";
+        private const string CountByConstructorParameters = RuleFieldValues.CountByConstructorParameters;
+        private const string CountByFields = RuleFieldValues.CountByFields;
+        private const string CountByAll = RuleFieldValues.CountByAll;
 
-        public string RuleType => "max-dependencies";
+        /// <summary>Valor de `rules[].type` no YAML tratado por este avaliador.</summary>
+        public const string TypeName = RuleTypeNames.MaxDependencies;
+
+        public string RuleType => TypeName;
 
         public void RegisterActions(
             Microsoft.CodeAnalysis.Diagnostics.CompilationStartAnalysisContext context,
@@ -67,14 +70,16 @@ namespace Arch.Rules
             ILayerResolver layerResolver,
             DiagnosticDescriptor slotDescriptor)
         {
-            string layer;
-            if (!rule.Extra.TryGetValue("layer", out layer) || string.IsNullOrEmpty(layer))
+            // Retornos mudos abaixo são defensivos: o parser já descarta com ARCH9008 a regra com
+            // `layer`/`countBy`/`max` ausentes ou inválidos.
+            var layer = rule.GetString(RuleFieldNames.Layer);
+            if (string.IsNullOrEmpty(layer))
             {
                 return;
             }
 
-            string countBy;
-            if (!rule.Extra.TryGetValue("countBy", out countBy) || string.IsNullOrEmpty(countBy))
+            var countBy = rule.GetString(RuleFieldNames.CountBy);
+            if (string.IsNullOrEmpty(countBy))
             {
                 return;
             }
@@ -83,14 +88,13 @@ namespace Arch.Rules
                 && !string.Equals(countBy, CountByFields, StringComparison.Ordinal)
                 && !string.Equals(countBy, CountByAll, StringComparison.Ordinal))
             {
-                // countBy malformado: regra malformada. Validar isso é responsabilidade do schema
-                // (Arch.Config/1A) — este avaliador simplesmente não reporta nada.
+                // countBy malformado: regra malformada (o parser já reporta ARCH9008) — este
+                // avaliador simplesmente não reporta nada.
                 return;
             }
 
-            string maxRaw;
             int max;
-            if (!rule.Extra.TryGetValue("max", out maxRaw) || !int.TryParse(maxRaw, out max))
+            if (!rule.TryGetInt(RuleFieldNames.Max, out max))
             {
                 return;
             }

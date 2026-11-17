@@ -105,13 +105,34 @@ namespace Arch.Config
                 throw new ArgumentException("Ao menos um texto YAML é necessário.", nameof(yamlTextsInPrecedenceOrder));
             }
 
-            var parsedDocuments = new List<ParsedDocument>(yamlTextsInPrecedenceOrder.Count);
-            foreach (var yamlText in yamlTextsInPrecedenceOrder)
+            ParsedDocument merged;
+            try
             {
-                parsedDocuments.Add(ArchConfigDocumentParser.Parse(yamlText));
-            }
+                var parsedDocuments = new List<ParsedDocument>(yamlTextsInPrecedenceOrder.Count);
+                foreach (var yamlText in yamlTextsInPrecedenceOrder)
+                {
+                    parsedDocuments.Add(ArchConfigDocumentParser.Parse(yamlText));
+                }
 
-            var merged = ArchConfigMerger.Merge(parsedDocuments);
+                merged = ArchConfigMerger.Merge(parsedDocuments);
+            }
+            catch (Exception ex)
+            {
+                // Rede de segurança (issue #4): nenhum YAML, por mais malformado, pode fazer uma
+                // exceção escapar deste ponto de entrada. Os caminhos conhecidos já viram
+                // SchemaValidationError no próprio parser; isto cobre o que ainda não foi previsto.
+                return new ArchConfigParseResult(
+                    null,
+                    new[]
+                    {
+                        new SchemaValidationError(
+                            "ARCH9001",
+                            "Falha inesperada ao interpretar o YAML (" + ex.GetType().Name + "): " + ex.Message,
+                            0,
+                            0,
+                            isBlocking: true),
+                    });
+            }
 
             if (merged.HasBlockingError)
             {

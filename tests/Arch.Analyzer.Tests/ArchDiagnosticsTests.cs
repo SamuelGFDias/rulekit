@@ -17,7 +17,8 @@ namespace Arch.Analyzer.Tests
         // vira AD0001 silencioso, o modo de falha que esta classe inteira existe para vigiar.
         private static readonly string[] EngineIds =
         {
-            "ARCH9001", "ARCH9002", "ARCH9003", "ARCH9004", "ARCH9005", "ARCH9006", "ARCH9007"
+            "ARCH9001", "ARCH9002", "ARCH9003", "ARCH9004", "ARCH9005", "ARCH9006", "ARCH9007",
+            "ARCH9008" // regra com campo ausente/desconhecido/inválido (issue #5)
         };
 
         [Fact]
@@ -82,6 +83,7 @@ namespace Arch.Analyzer.Tests
             Assert.Equal(DiagnosticSeverity.Warning, byId["ARCH9004"].DefaultSeverity);
             Assert.Equal(DiagnosticSeverity.Warning, byId["ARCH9006"].DefaultSeverity);
             Assert.Equal(DiagnosticSeverity.Warning, byId["ARCH9007"].DefaultSeverity);
+            Assert.Equal(DiagnosticSeverity.Warning, byId["ARCH9008"].DefaultSeverity);
         }
 
         [Fact]

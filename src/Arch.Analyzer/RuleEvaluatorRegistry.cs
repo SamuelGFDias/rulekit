@@ -26,9 +26,11 @@ namespace Arch.Analyzer
     internal static class RuleEvaluatorRegistry
     {
         /// <summary>
-        /// Comparação do `type` da regra. OrdinalIgnoreCase para que `Forbidden-Call` e
-        /// `forbidden-call` não virem um ARCH9003 gratuito — o schema (Arch.Config) é quem decide se
-        /// quer ser estrito com a grafia.
+        /// Comparação do `type` da regra. A fonte de verdade do que é um `type` válido é
+        /// <see cref="Arch.Config.RuleTypeCatalog"/>: o parser já entrega o nome canônico em minúsculas
+        /// (e descarta com ARCH9003 o que o catálogo não conhece). Este registro é só despacho;
+        /// OrdinalIgnoreCase continua como defesa para configs montadas à mão. Um teste
+        /// (<c>RuleEvaluatorRegistryDefaultTests</c>) falha se catálogo e registro divergirem.
         /// </summary>
         internal static readonly StringComparer TypeComparer = StringComparer.OrdinalIgnoreCase;
 
@@ -38,17 +40,12 @@ namespace Arch.Analyzer
         /// <summary>
         /// Registro usado pelo analyzer em produção — os 4 avaliadores concretos da Fase 2.
         /// </summary>
-        internal static ImmutableDictionary<string, IRuleEvaluator> Default
-        {
-            get
-            {
-                return Create(
-                    new ForbiddenCallEvaluator(),
-                    new MustRouteThroughEvaluator(),
-                    new NamingConventionEvaluator(),
-                    new MaxDependenciesEvaluator());
-            }
-        }
+        /// <remarks>Instanciado uma vez: os avaliadores não guardam estado por compilação.</remarks>
+        internal static readonly ImmutableDictionary<string, IRuleEvaluator> Default = Create(
+            new ForbiddenCallEvaluator(),
+            new MustRouteThroughEvaluator(),
+            new NamingConventionEvaluator(),
+            new MaxDependenciesEvaluator());
 
         /// <summary>
         /// Monta um registro a partir dos avaliadores dados, indexado por

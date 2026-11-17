@@ -1,3 +1,4 @@
+using System.Linq;
 using Xunit;
 
 namespace Arch.Analyzer.Tests
@@ -19,6 +20,32 @@ namespace Arch.Analyzer.Tests
             Assert.True(registry.ContainsKey("must-route-through"));
             Assert.True(registry.ContainsKey("naming-convention"));
             Assert.True(registry.ContainsKey("max-dependencies"));
+        }
+
+        /// <summary>
+        /// Issue #17: o catálogo de Arch.Config é a fonte de verdade do que é um `type` válido e o
+        /// registro é só despacho. Falha se um tipo do catálogo ficar sem avaliador (regra aceita pelo
+        /// parser que nunca seria avaliada) ou se um avaliador for registrado para um tipo que o
+        /// catálogo não conhece (o parser descartaria a regra com ARCH9003 antes de chegar aqui).
+        /// </summary>
+        [Fact]
+        public void Default_e_RuleTypeCatalog_declaram_exatamente_os_mesmos_tipos()
+        {
+            var catalogTypes = Arch.Config.RuleTypeCatalog.Default.TypeNames
+                .OrderBy(n => n, System.StringComparer.Ordinal)
+                .ToArray();
+            var registryTypes = RuleEvaluatorRegistry.Default.Keys
+                .OrderBy(n => n, System.StringComparer.Ordinal)
+                .ToArray();
+
+            Assert.Equal(catalogTypes, registryTypes);
+            Assert.All(RuleEvaluatorRegistry.Default, kv => Assert.Equal(kv.Key, kv.Value.RuleType));
+        }
+
+        [Fact]
+        public void Default_e_instancia_unica()
+        {
+            Assert.Same(RuleEvaluatorRegistry.Default, RuleEvaluatorRegistry.Default);
         }
     }
 }

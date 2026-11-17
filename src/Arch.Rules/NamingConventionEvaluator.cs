@@ -16,24 +16,19 @@ namespace Arch.Rules
     /// require: { suffix: Repository }
     /// </code>
     ///
-    /// A camada-alvo chega em <c>rule.Extra["layer"]</c> (ex.: "Repository") e a convenção exigida
-    /// chega em <c>rule.Extra["require"]</c> já serializada como uma única string no formato
-    /// "chave=valor" (ex.: "suffix=Repository") — convenção confirmada em
-    /// <c>tests/Arch.Config.Tests/ArchConfigParserTests.cs</c> (linhas 114-115 no momento desta
-    /// implementação), onde o parser da trilha 1A converte o mapa `require: { suffix: Repository }`
-    /// do YAML nessa string única dentro de <see cref="RuleDefinition.Extra"/>.
+    /// A camada-alvo chega no campo <c>layer</c> (escalar) e a convenção exigida no campo
+    /// <c>require</c>, que o catálogo (<see cref="RuleTypeCatalog"/>) declara como par chave/valor
+    /// (<c>require: { suffix: Repository }</c>), lido por <see cref="RuleDefinition.TryGetKeyValue"/>
+    /// (na forma texto: "suffix=Repository").
     ///
-    /// O ADR só documenta `suffix` hoje. Este avaliador também reconhece `prefix` com o mesmo
-    /// formato de parsing (ex.: "prefix=I") como SUPORTE ANTECIPADO — não é exigido pelo ADR nesta
-    /// fase, mas usa exatamente o mesmo mecanismo de "chave=valor" e não custa nada manter pronto.
-    /// Qualquer outra chave em `require` é tratada como `suffix` (comportamento de fallback, não
-    /// documentado, mas nunca silenciosamente ignorado — o schema de `Arch.Config` é quem decide se
-    /// quer ser estrito com chaves desconhecidas).
+    /// O ADR documenta `suffix`; `prefix` é aceito como SUPORTE ANTECIPADO. O parser rejeita
+    /// (ARCH9008) qualquer outra chave; uma regra montada à mão com outra chave cai no fallback de
+    /// `suffix` aqui, por defesa.
     /// </summary>
     public sealed class NamingConventionEvaluator : IRuleEvaluator
     {
         /// <summary>Valor de `rules[].type` no YAML tratado por este avaliador.</summary>
-        public const string TypeName = "naming-convention";
+        public const string TypeName = RuleTypeNames.NamingConvention;
 
         public string RuleType => TypeName;
 
@@ -43,21 +38,17 @@ namespace Arch.Rules
             ILayerResolver layerResolver,
             DiagnosticDescriptor slotDescriptor)
         {
-            string layerName;
-            if (!rule.Extra.TryGetValue("layer", out layerName) || string.IsNullOrEmpty(layerName))
-            {
-                return;
-            }
-
-            string requireRaw;
-            if (!rule.Extra.TryGetValue("require", out requireRaw) || string.IsNullOrEmpty(requireRaw))
+            // Retornos mudos abaixo são defensivos: o parser já descarta com ARCH9008 a regra sem
+            // `layer`/`require` válidos, então só uma RuleDefinition montada à mão chega aqui assim.
+            var layerName = rule.GetString(RuleFieldNames.Layer);
+            if (string.IsNullOrEmpty(layerName))
             {
                 return;
             }
 
             string kind;
             string value;
-            if (!TryParseRequire(requireRaw, out kind, out value))
+            if (!rule.TryGetKeyValue(RuleFieldNames.Require, out kind, out value))
             {
                 return;
             }
@@ -96,29 +87,9 @@ namespace Arch.Rules
                 SymbolKind.NamedType);
         }
 
-        /// <summary>
-        /// Extrai o par chave/valor de uma entrada `require` já serializada como "chave=valor"
-        /// (ex.: "suffix=Repository"). Devolve false para qualquer formato inesperado, em vez de
-        /// lançar — uma regra mal configurada não deve derrubar o analyzer.
-        /// </summary>
-        private static bool TryParseRequire(string raw, out string kind, out string value)
-        {
-            var separatorIndex = raw.IndexOf('=');
-            if (separatorIndex <= 0 || separatorIndex == raw.Length - 1)
-            {
-                kind = null;
-                value = null;
-                return false;
-            }
-
-            kind = raw.Substring(0, separatorIndex).Trim();
-            value = raw.Substring(separatorIndex + 1).Trim();
-            return !string.IsNullOrEmpty(kind) && !string.IsNullOrEmpty(value);
-        }
-
         private static bool Satisfies(string typeName, string kind, string value)
         {
-            if (string.Equals(kind, "prefix", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(kind, RuleFieldValues.RequirePrefix, StringComparison.OrdinalIgnoreCase))
             {
                 return typeName.StartsWith(value, StringComparison.Ordinal);
             }

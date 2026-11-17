@@ -15,23 +15,25 @@ namespace Arch.Config.Internal
     /// `extends` (isso é <see cref="ArchConfigMerger"/>, orquestrado por
     /// <see cref="ArchConfigParser"/>) nem faz I/O.
     ///
-    /// Chave desconhecida em qualquer nível é sempre erro de schema bloqueante (ARCH9001) — ADR-001
-    /// D1. Isso vale também para os campos "extra" de `rules[]` (from/to/through/layer/require/
-    /// max/countBy): o conjunto é fixo nesta MAJOR (v1); um campo fora dele é rejeitado, não
-    /// silenciosamente aceito no `RuleDefinition.Extra` — manter esse bag "aberto" de fato
-    /// contradiria D1. Estender o conjunto é uma mudança MINOR aditiva de schema.
+    /// Chave desconhecida no nível raiz, de camada, de critério ou de `defaults` é erro de schema
+    /// bloqueante (ARCH9001) — ADR-001 D1. Dentro de `rules[]`, as chaves CORE (id/slot/type/
+    /// enabled/severity/message/help) são validadas sempre; os campos específicos do tipo só depois
+    /// de resolver o `type` contra <see cref="RuleTypeCatalog"/> (issues #2, #3, #5, #17):
+    /// <list type="bullet">
+    /// <item>`type` desconhecido (comparado com trim e sem diferenciar caixa): ARCH9003 não
+    /// bloqueante e a regra é descartada SEM examinar os campos dela — política MINOR-aditiva de D4.</item>
+    /// <item>`type` conhecido com campo obrigatório ausente, chave que o tipo não declara ou valor
+    /// inválido: ARCH9008 não bloqueante (um por regra, citando todos os campos), regra descartada,
+    /// demais regras continuam valendo.</item>
+    /// </list>
+    /// Nenhum caminho lança exceção para YAML malformado: chave complexa (não escalar) vira ARCH9001.
     /// </summary>
     internal static class ArchConfigDocumentParser
     {
-        private static readonly HashSet<string> KnownRuleTypes = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "forbidden-call", "must-route-through", "naming-convention", "max-dependencies"
-        };
+        internal const string InvalidRuleFieldsCode = "ARCH9008";
+        internal const string UnknownRuleTypeCode = "ARCH9003";
 
-        private static readonly HashSet<string> KnownExtraKeys = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "from", "to", "through", "layer", "require", "max", "countBy"
-        };
+        private static readonly RuleTypeCatalog Catalog = RuleTypeCatalog.Default;
 
         private static readonly HashSet<string> AllowedTopLevelKeys = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -88,7 +90,11 @@ namespace Arch.Config.Internal
 
             foreach (var kv in root.Children)
             {
-                var key = ((YamlScalarNode)kv.Key).Value;
+                if (!TryGetKey(result, kv, "no nível raiz", out var key))
+                {
+                    return result;
+                }
+
                 if (!AllowedTopLevelKeys.Contains(key))
                 {
                     Blocking(result, $"Chave desconhecida no nível raiz: '{key}'.", kv.Key.Start);
@@ -149,12 +155,14 @@ namespace Arch.Config.Internal
                 return false;
             }
 
-            var major = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
-            if (major != 1)
+            // TryParse: o regex aceita dígitos ilimitados; um major que não cabe em int é só mais um
+            // major não suportado, nunca uma OverflowException (issue #4).
+            if (!int.TryParse(match.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var major)
+                || major != 1)
             {
                 Blocking(
                     result,
-                    $"'schema' com MAJOR não suportada: 'arch-rules/v{major}'. Esta versão da lib só entende a major v1 (ADR-001 D4).",
+                    $"'schema' com MAJOR não suportada: '{schemaScalar.Value}'. Esta versão da lib só entende a major v1 (ADR-001 D4).",
                     schemaScalar.Start);
                 return false;
             }
@@ -251,7 +259,10 @@ namespace Arch.Config.Internal
 
             foreach (var layerKv in layersMap.Children)
             {
-                var layerName = ((YamlScalarNode)layerKv.Key).Value;
+                if (!TryGetKey(result, layerKv, "em 'layers'", out var layerName))
+                {
+                    return false;
+                }
 
                 if (!(layerKv.Value is YamlMappingNode layerDef))
                 {
@@ -261,7 +272,11 @@ namespace Arch.Config.Internal
 
                 foreach (var lk in layerDef.Children)
                 {
-                    var lkName = ((YamlScalarNode)lk.Key).Value;
+                    if (!TryGetKey(result, lk, $"na camada '{layerName}'", out var lkName))
+                    {
+                        return false;
+                    }
+
                     if (!AllowedLayerKeys.Contains(lkName))
                     {
                         Blocking(result, $"Chave desconhecida na camada '{layerName}': '{lkName}'.", lk.Key.Start);
@@ -327,7 +342,11 @@ namespace Arch.Config.Internal
 
                 foreach (var kv in itemMap.Children)
                 {
-                    var key = ((YamlScalarNode)kv.Key).Value;
+                    if (!TryGetKey(result, kv, $"em critério de '{fieldName}' da camada '{layerName}'", out var key))
+                    {
+                        return false;
+                    }
+
                     if (!AllowedCriterionKeys.Contains(key))
                     {
                         Blocking(
@@ -380,7 +399,10 @@ namespace Arch.Config.Internal
 
             foreach (var kv in sevMap.Children)
             {
-                var name = ((YamlScalarNode)kv.Key).Value;
+                if (!TryGetKey(result, kv, "em 'severities'", out var name))
+                {
+                    return false;
+                }
                 if (!(kv.Value is YamlScalarNode valueScalar))
                 {
                     Blocking(result, $"Severidade '{name}' deve ter um valor escalar.", kv.Value.Start);
@@ -408,7 +430,11 @@ namespace Arch.Config.Internal
 
             foreach (var kv in defMap.Children)
             {
-                var key = ((YamlScalarNode)kv.Key).Value;
+                if (!TryGetKey(result, kv, "em 'defaults'", out var key))
+                {
+                    return false;
+                }
+
                 if (key != "severity")
                 {
                     Blocking(result, $"Chave desconhecida em 'defaults': '{key}'.", kv.Key.Start);
@@ -453,11 +479,17 @@ namespace Arch.Config.Internal
         {
             string id = null, slot = null, type = null, severity = null, message = null, help = null;
             var enabled = true;
-            var extra = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            // Campos específicos do tipo: só coletados aqui. A validação deles depende do `type`
+            // resolvido — se o tipo for desconhecido, eles nem são examinados (issue #2).
+            var typeFields = new List<KeyValuePair<string, YamlNode>>();
 
             foreach (var kv in ruleMap.Children)
             {
-                var key = ((YamlScalarNode)kv.Key).Value;
+                if (!TryGetKey(result, kv, $"na regra{(id != null ? $" '{id}'" : string.Empty)}", out var key))
+                {
+                    return false;
+                }
 
                 if (AllowedRuleCoreKeys.Contains(key))
                 {
@@ -492,17 +524,9 @@ namespace Arch.Config.Internal
                             break;
                     }
                 }
-                else if (KnownExtraKeys.Contains(key))
-                {
-                    extra[key] = StringifyNode(kv.Value);
-                }
                 else
                 {
-                    Blocking(
-                        result,
-                        $"Chave desconhecida na regra{(id != null ? $" '{id}'" : string.Empty)}: '{key}'.",
-                        kv.Key.Start);
-                    return false;
+                    typeFields.Add(new KeyValuePair<string, YamlNode>(key, kv.Value));
                 }
             }
 
@@ -524,12 +548,12 @@ namespace Arch.Config.Internal
                 return false;
             }
 
-            if (!KnownRuleTypes.Contains(type))
+            if (!Catalog.TryGetType(type, out var typeSchema))
             {
                 // ARCH9003: não bloqueante (ADR-001 D4, MINOR aditivo) — a regra é descartada de
-                // Rules, mas o parsing do documento continua e as demais regras seguem valendo.
+                // Rules sem examinar seus campos, e as demais regras seguem valendo.
                 result.Errors.Add(new SchemaValidationError(
-                    "ARCH9003",
+                    UnknownRuleTypeCode,
                     $"Regra '{id}': type '{type}' desconhecido — requer uma versão mais nova da lib. Regra ignorada.",
                     ruleMap.Start.Line,
                     ruleMap.Start.Column,
@@ -537,8 +561,199 @@ namespace Arch.Config.Internal
                 return true;
             }
 
-            result.Rules.Add(new RuleDefinition(id, slot, type, enabled, severity, message, help, extra));
+            var problems = new List<string>();
+            var properties = new Dictionary<string, RulePropertyValue>(StringComparer.Ordinal);
+
+            foreach (var field in typeFields)
+            {
+                if (!typeSchema.TryGetField(field.Key, out var fieldSchema))
+                {
+                    problems.Add($"chave '{field.Key}' não é aceita pelo type '{typeSchema.Name}'");
+                    continue;
+                }
+
+                if (TryConvertField(fieldSchema, field.Value, out var value, out var problem))
+                {
+                    properties[fieldSchema.Name] = value;
+                }
+                else
+                {
+                    problems.Add($"'{fieldSchema.Name}' {problem}");
+                }
+            }
+
+            var missing = typeSchema.Fields
+                .Where(f => f.Required && typeFields.All(tf => !string.Equals(tf.Key, f.Name, StringComparison.Ordinal)))
+                .Select(f => $"'{f.Name}'")
+                .ToList();
+            if (missing.Count > 0)
+            {
+                problems.Insert(0, (missing.Count == 1 ? "campo obrigatório ausente: " : "campos obrigatórios ausentes: ")
+                    + string.Join(", ", missing));
+            }
+
+            if (problems.Count > 0)
+            {
+                // ARCH9008: não bloqueante — a regra não seria avaliada como o autor espera, então é
+                // descartada de forma RUIDOSA (issue #5), sem derrubar as demais.
+                result.Errors.Add(new SchemaValidationError(
+                    InvalidRuleFieldsCode,
+                    $"Regra '{id}' (type '{typeSchema.Name}') ignorada: {string.Join("; ", problems)}.",
+                    ruleMap.Start.Line,
+                    ruleMap.Start.Column,
+                    isBlocking: false));
+                return true;
+            }
+
+            // Slot do pool é guardado na forma canônica (ARCHnnnn), para que CLI e analyzer gerem e
+            // consultem a mesma chave; fora do pool fica como veio, e ARCH9002 é decidido adiante.
+            var normalizedSlot = SlotPool.TryNormalize(slot, out var canonicalSlot) ? canonicalSlot : slot;
+
+            result.Rules.Add(RuleDefinition.FromProperties(
+                id, normalizedSlot, typeSchema.Name, enabled, severity, message, help, properties));
             return true;
+        }
+
+        /// <summary>
+        /// Converte o nó YAML de um campo para a forma declarada no catálogo. Devolve false com uma
+        /// descrição curta do problema (sem o nome do campo) quando o valor não serve.
+        /// </summary>
+        private static bool TryConvertField(RuleFieldSchema field, YamlNode node, out RulePropertyValue value, out string problem)
+        {
+            value = null;
+            problem = null;
+
+            switch (field.Kind)
+            {
+                case RuleFieldKind.Scalar:
+                {
+                    var text = (node as YamlScalarNode)?.Value?.Trim();
+                    if (string.IsNullOrEmpty(text))
+                    {
+                        problem = "deve ser um valor escalar não vazio";
+                        return false;
+                    }
+
+                    if (!field.IsAllowedValue(text))
+                    {
+                        problem = $"tem valor '{text}' inválido (aceitos: {string.Join(", ", field.AllowedValues)})";
+                        return false;
+                    }
+
+                    value = RulePropertyValue.FromScalar(text);
+                    return true;
+                }
+
+                case RuleFieldKind.List:
+                {
+                    var items = new List<string>();
+                    if (node is YamlScalarNode single)
+                    {
+                        items.Add(single.Value?.Trim());
+                    }
+                    else if (node is YamlSequenceNode seq)
+                    {
+                        foreach (var item in seq.Children)
+                        {
+                            items.Add((item as YamlScalarNode)?.Value?.Trim());
+                        }
+                    }
+                    else
+                    {
+                        problem = "deve ser uma lista de valores escalares";
+                        return false;
+                    }
+
+                    if (items.Count == 0 || items.Any(string.IsNullOrEmpty))
+                    {
+                        problem = "deve ser uma lista não vazia de valores escalares não vazios";
+                        return false;
+                    }
+
+                    var notAllowed = items.FirstOrDefault(i => !field.IsAllowedValue(i));
+                    if (notAllowed != null)
+                    {
+                        problem = $"tem item '{notAllowed}' inválido (aceitos: {string.Join(", ", field.AllowedValues)})";
+                        return false;
+                    }
+
+                    value = RulePropertyValue.FromList(items);
+                    return true;
+                }
+
+                case RuleFieldKind.Integer:
+                {
+                    var text = (node as YamlScalarNode)?.Value?.Trim();
+                    if (!int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var number)
+                        || number < 0)
+                    {
+                        problem = $"deve ser um inteiro não negativo (encontrado: '{DescribeNode(node)}')";
+                        return false;
+                    }
+
+                    value = RulePropertyValue.FromInteger(number);
+                    return true;
+                }
+
+                case RuleFieldKind.KeyValue:
+                {
+                    string key, val;
+                    if (node is YamlMappingNode map)
+                    {
+                        if (map.Children.Count != 1
+                            || !(map.Children.First().Key is YamlScalarNode keyNode)
+                            || !(map.Children.First().Value is YamlScalarNode valueNode)
+                            || string.IsNullOrWhiteSpace(keyNode.Value)
+                            || string.IsNullOrWhiteSpace(valueNode.Value))
+                        {
+                            problem = "deve ser um mapeamento com exatamente um par chave: valor (ex.: { suffix: Repository })";
+                            return false;
+                        }
+
+                        key = keyNode.Value.Trim();
+                        val = valueNode.Value.Trim();
+                    }
+                    else if (!(node is YamlScalarNode scalar) || !RuleDefinition.TryParseKeyValue(scalar.Value, out key, out val))
+                    {
+                        problem = "deve ser um mapeamento com exatamente um par chave: valor (ex.: { suffix: Repository })";
+                        return false;
+                    }
+
+                    if (!field.IsAllowedValue(key))
+                    {
+                        problem = $"tem chave '{key}' inválida (aceitas: {string.Join(", ", field.AllowedValues)})";
+                        return false;
+                    }
+
+                    value = RulePropertyValue.FromKeyValue(key, val);
+                    return true;
+                }
+
+                default:
+                    problem = "tem uma forma não suportada";
+                    return false;
+            }
+        }
+
+        private static string DescribeNode(YamlNode node)
+            => node is YamlScalarNode scalar ? scalar.Value ?? string.Empty : StringifyNode(node);
+
+        /// <summary>
+        /// Lê a chave de um par de mapeamento. Uma chave complexa (`? [a, b] : v`, sequência ou
+        /// mapeamento como chave) não existe neste schema e vira ARCH9001 bloqueante — nunca um
+        /// InvalidCastException (issue #4).
+        /// </summary>
+        private static bool TryGetKey(ParsedDocument result, KeyValuePair<YamlNode, YamlNode> kv, string where, out string key)
+        {
+            if (kv.Key is YamlScalarNode scalar && scalar.Value != null)
+            {
+                key = scalar.Value;
+                return true;
+            }
+
+            key = null;
+            Blocking(result, $"Chave complexa (não escalar) {where} não é suportada neste schema.", kv.Key.Start);
+            return false;
         }
 
         private static string StringifyNode(YamlNode node)

@@ -35,18 +35,17 @@ namespace Arch.Rules
     public class ForbiddenCallEvaluator : IRuleEvaluator
     {
         /// <summary>Valor de `rules[].type` no YAML tratado por esta classe.</summary>
-        public const string TypeName = "forbidden-call";
+        public const string TypeName = RuleTypeNames.ForbiddenCall;
 
         /// <summary>
-        /// Chaves de <see cref="RuleDefinition.Extra"/> onde o parser (trilha 1A) entrega as camadas.
-        /// Confirmado contra <c>Arch.Config/Internal/ArchConfigDocumentParser.cs</c>: `from`/`to` estão
-        /// em <c>KnownExtraKeys</c> e são serializados como escalares simples
-        /// (<c>Extra["from"] = "Controller"</c>), num dicionário <see cref="StringComparer.Ordinal"/>.
+        /// Campos de <see cref="RuleDefinition.Properties"/> onde o parser entrega as camadas — nomes
+        /// vindos de <see cref="RuleFieldNames"/> (catálogo <see cref="RuleTypeCatalog"/>, que
+        /// declara ambos como escalares obrigatórios).
         /// </summary>
-        public const string FromKey = "from";
+        public const string FromKey = RuleFieldNames.From;
 
         /// <inheritdoc cref="FromKey"/>
-        public const string ToKey = "to";
+        public const string ToKey = RuleFieldNames.To;
 
         // Chaves de Diagnostic.Properties. ADR-001 §3 (Opção C) exige que o ID de negócio da
         // organização chegue ao consumidor pela mensagem E por Properties — Properties é o canal
@@ -219,7 +218,7 @@ namespace Arch.Rules
 
         /// <summary>
         /// Substitui `{from}`, `{to}`, `{symbol}` e `{id}` — mais QUALQUER chave presente em
-        /// <see cref="RuleDefinition.Extra"/>, o que faz `{through}` funcionar de graça para
+        /// <see cref="RuleDefinition.Properties"/> (forma texto), o que faz `{through}` funcionar de graça para
         /// `must-route-through` (trilha 2B) sem um hook próprio. Um `{nome}` não resolvido fica no
         /// texto como está; um `{` sem `}` correspondente encerra a expansão e o resto é copiado
         /// literal. Nenhum caminho lança exceção.
@@ -300,11 +299,12 @@ namespace Arch.Rules
                     return true;
             }
 
-            // Demais campos do YAML da própria regra (`through`, `layer`, `max`, `countBy`, ...).
-            // Extra é Ordinal (parser da trilha 1A), então a grafia do placeholder é sensível a caixa
-            // exatamente como a chave do YAML — o que é o comportamento desejável: `{countBy}` é a
-            // chave, `{countby}` não existe.
-            return rule.Extra != null && rule.Extra.TryGetValue(name, out value);
+            // Demais campos do YAML da própria regra (`through`, `layer`, `max`, `countBy`, ...), na
+            // forma texto (lista "A,B", sem espaço). Properties é Ordinal, então a grafia do
+            // placeholder é sensível a caixa exatamente como a chave do YAML — `{countBy}` é a chave,
+            // `{countby}` não existe.
+            value = rule.GetString(name);
+            return value != null;
         }
 
         /// <summary>
@@ -439,8 +439,8 @@ namespace Arch.Rules
 
         private static bool TryGetLayerName(RuleDefinition rule, string key, out string layerName)
         {
-            string raw;
-            if (rule.Extra != null && rule.Extra.TryGetValue(key, out raw) && !string.IsNullOrWhiteSpace(raw))
+            var raw = rule.GetString(key);
+            if (!string.IsNullOrWhiteSpace(raw))
             {
                 layerName = raw.Trim();
                 return true;

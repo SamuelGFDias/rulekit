@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Arch.Config;
 
 namespace Arch.Cli
@@ -15,9 +14,8 @@ namespace Arch.Cli
     /// repassado como veio quando usa esses nomes diretamente (não há conversão a fazer); o que
     /// existe aqui é validação, não tradução.
     ///
-    /// Arch.Config.Internal.ArchConfigDocumentParser não valida esse vocabulário — aceita o valor
-    /// de `severities:` como string livre (ver ArchConfigDocumentParser.ParseSeverities) — por
-    /// isso esta validação vive no CLI, não no parser.
+    /// O vocabulário e a resolução nome → valor vivem em <see cref="SeverityVocabulary"/>
+    /// (Arch.Config, fonte única — issue #19); aqui fica só a tradução para diagnósticos do CLI.
     /// </summary>
     public static class SeverityResolver
     {
@@ -27,8 +25,9 @@ namespace Arch.Cli
         /// gen/validate), não do parser nem do analyzer.</summary>
         public const string InvalidSeverityCode = "CLI-SEVERITY";
 
+        /// <summary>Vocabulário aceito — derivado de <see cref="SeverityVocabulary"/> (fonte única, issue #19).</summary>
         public static readonly HashSet<string> AllowedAnalyzerConfigValues =
-            new HashSet<string>(StringComparer.Ordinal) { "error", "warning", "suggestion", "silent", "none" };
+            new HashSet<string>(SeverityVocabulary.AllowedValues, StringComparer.Ordinal);
 
         public static IReadOnlyDictionary<string, string> Resolve(ArchConfig config, out IReadOnlyList<CliDiagnostic> errors)
         {
@@ -37,40 +36,39 @@ namespace Arch.Cli
 
             foreach (var rule in config.Rules)
             {
-                var severityName = rule.SeverityName ?? config.DefaultSeverityName;
+                var resolution = SeverityVocabulary.Resolve(config, rule);
 
-                if (severityName == null)
+                switch (resolution.Status)
                 {
-                    errorList.Add(new CliDiagnostic(
-                        InvalidSeverityCode,
-                        $"Regra '{rule.Id}': nenhuma 'severity' declarada e nenhum 'defaults.severity' definido no YAML.",
-                        0,
-                        0));
-                    continue;
-                }
+                    case SeverityResolutionStatus.NotDeclared:
+                        errorList.Add(new CliDiagnostic(
+                            InvalidSeverityCode,
+                            $"Regra '{rule.Id}': nenhuma 'severity' declarada e nenhum 'defaults.severity' definido no YAML.",
+                            0,
+                            0));
+                        break;
 
-                if (!config.Severities.TryGetValue(severityName, out var value))
-                {
-                    errorList.Add(new CliDiagnostic(
-                        InvalidSeverityCode,
-                        $"Regra '{rule.Id}': severidade '{severityName}' não está declarada no bloco 'severities:'.",
-                        0,
-                        0));
-                    continue;
-                }
+                    case SeverityResolutionStatus.UnknownName:
+                        errorList.Add(new CliDiagnostic(
+                            InvalidSeverityCode,
+                            $"Regra '{rule.Id}': severidade '{resolution.Name}' não está declarada no bloco 'severities:'.",
+                            0,
+                            0));
+                        break;
 
-                if (!AllowedAnalyzerConfigValues.Contains(value))
-                {
-                    errorList.Add(new CliDiagnostic(
-                        InvalidSeverityCode,
-                        $"Regra '{rule.Id}': severities.{severityName} = '{value}' não é um valor válido de " +
-                        "AnalyzerConfig. Use apenas error/warning/suggestion/silent/none (nunca info/hidden — ADR-001 D3).",
-                        0,
-                        0));
-                    continue;
-                }
+                    case SeverityResolutionStatus.InvalidValue:
+                        errorList.Add(new CliDiagnostic(
+                            InvalidSeverityCode,
+                            $"Regra '{rule.Id}': severities.{resolution.Name} = '{resolution.Value}' não é um valor válido de " +
+                            $"AnalyzerConfig. Use apenas {string.Join("/", SeverityVocabulary.AllowedValues)} (nunca info/hidden — ADR-001 D3).",
+                            0,
+                            0));
+                        break;
 
-                resolved[rule.Id] = value;
+                    default:
+                        resolved[rule.Id] = resolution.Value;
+                        break;
+                }
             }
 
             errors = errorList;
