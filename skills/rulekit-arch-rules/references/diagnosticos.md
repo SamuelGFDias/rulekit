@@ -66,10 +66,9 @@ motor pontualmente).
   inesperado estourar; trate como erro de configuração/ambiente.
 - Não existe diagnóstico para **nome de camada inexistente** em `from`/`to`/`layer`: a regra só nunca
   dispara. Se uma regra "não funciona", confira os nomes primeiro.
-- No **build**, `ARCH9002`/`ARCH9003`/`ARCH9008` são avisos e o build continua; no **CLI**, só `ARCH9002`
-  (slot) é erro. `ARCH9003` e `ARCH9008` aparecem como linhas `AVISO` com **código de saída 0**. Para
-  não deixar uma regra ignorada passar despercebida, trate qualquer linha `AVISO` do `validate` como
-  falha no CI.
+- No **build**, `ARCH9002`/`ARCH9003`/`ARCH9008` são avisos e o build continua. No **CLI**, `ARCH9002`
+  (slot) é erro em `validate` e `gen`; `ARCH9008` é erro (código 1) em `validate` e aviso em `gen`;
+  `ARCH9003` é aviso (código 0). Com `--strict`, qualquer aviso falha — é o modo recomendado no CI.
 - Para silenciar um aviso do motor de propósito: `dotnet_diagnostic.ARCH9006.severity = none`
   (ou `#pragma`), por exemplo.
 

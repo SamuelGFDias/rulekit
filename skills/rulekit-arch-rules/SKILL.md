@@ -52,7 +52,7 @@ curl -s https://api.nuget.org/v3-flatcontainer/rulekit.analyzer/index.json
   `NuGet.Config`. Avise o usuário; não invente uma versão.
 - Requisito: o analyzer foi compilado contra `Microsoft.CodeAnalysis.CSharp` 4.8, então precisa do
   compilador do **SDK .NET 8+** (ou Visual Studio 2022 17.8+). O `TargetFramework` do projeto é livre. O
-  `arch-rules` (CLI) roda em **.NET 10+**.
+  `arch-rules` (CLI) roda em **.NET 8+**.
 - Sem pacote → Passo 2 em diante. Com pacote e YAML → vá direto ao que o usuário pediu (revisar regra,
   ajustar severidade, entender um diagnóstico) usando as referências.
 - Sem um `arch-rules.yaml` ao lado do `.csproj`, o analyzer **não faz nada e não avisa**: instalar o
@@ -119,8 +119,9 @@ dotnet arch-rules validate arch-rules.yaml   # confere schema, slots, severidade
 dotnet arch-rules gen arch-rules.yaml        # gera .globalconfig + arch-rules.lock.yaml ao lado do YAML
 ```
 
-- Leia **todas** as linhas `AVISO` do `validate`: `ARCH9003` (tipo desconhecido) e `ARCH9008` (campo
-  ausente/inválido) ignoram a regra **mas o código de saída continua 0**.
+- Leia **todas** as linhas `ERRO`/`AVISO` do `validate`: `ARCH9008` (campo ausente/inválido) sai como
+  `ERRO` (código 1); `ARCH9003` (tipo desconhecido) só avisa e a regra fica de fora. Use `--strict` para
+  qualquer aviso falhar.
 - Versione o `arch-rules.yaml`, o `.globalconfig` e o `arch-rules.lock.yaml`. O `.globalconfig` ao lado do
   `.csproj` é aplicado pelo compilador sem editar o `.csproj`.
 - A severidade que o compilador usa vive no `.globalconfig` (ou `.editorconfig`), **não** no YAML. Mudou a
@@ -142,7 +143,7 @@ dotnet build
 
 ## Passo 7: CI
 
-Rode `arch-rules validate` (tratando `AVISO` como falha) e confira que o `.globalconfig` e o lock gerados
+Rode `arch-rules validate --strict` e confira que o `.globalconfig` e o lock gerados
 estão em sincronia com o YAML. Job completo em `references/cli-e-ci.md`.
 
 ## Armadilhas (e o porquê)

@@ -277,6 +277,24 @@ de política em code review. Se ele já existir e divergir do que seria gerado, 
   analisado. A lib previne deriva, não prova conformidade. `must-route-through` não verifica a rota.
 - **CLI exige runtime .NET 8+** (ver [Requisitos](#requisitos)).
 
+## Skill para assistente de código
+
+O repositório traz uma skill em [`skills/rulekit-arch-rules`](https://github.com/SamuelGFDias/rulekit/tree/main/skills/rulekit-arch-rules) que guia um assistente como o Claude Code a configurar o RuleKit num projeto: diagnosticar o que já existe, levantar a arquitetura real (namespaces, projetos, sufixos), perguntar a política que você quer em vez de inventá-la, instalar os pacotes, escrever o `arch-rules.yaml`, rodar `arch-rules gen`, conferir o build e montar o job de CI. As referências cobrem o YAML completo, todos os diagnósticos `ARCH9xxx` e o CLI.
+
+Para usar no Claude Code, copie a pasta para `.claude/skills/` do seu projeto (ou para `~/.claude/skills/`, para valer em todos):
+
+```bash
+base=https://raw.githubusercontent.com/SamuelGFDias/rulekit/main/skills/rulekit-arch-rules
+dest=.claude/skills/rulekit-arch-rules
+mkdir -p "$dest/references"
+curl -fsSL "$base/SKILL.md" -o "$dest/SKILL.md"
+for f in yaml-referencia diagnosticos cli-e-ci; do
+  curl -fsSL "$base/references/$f.md" -o "$dest/references/$f.md"
+done
+```
+
+Depois, é só pedir algo como "configura o RuleKit neste projeto com as regras da nossa arquitetura em camadas". No claude.ai, a mesma pasta compactada em `.zip` pode ser enviada como skill.
+
 ## Mais
 
 - [ADR-001](https://github.com/SamuelGFDias/rulekit/blob/main/ADR-001-motor-regras-arquiteturais.md) — decisão de arquitetura, alternativas e trade-offs.

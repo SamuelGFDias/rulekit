@@ -1,7 +1,7 @@
 # `arch-rules` (RuleKit.Cli) e CI
 
-`RuleKit.Cli` é um dotnet tool (`net10.0`, com roll-forward para runtimes mais novos); o comando é
-`arch-rules`. Exige o runtime .NET 10+ na máquina. Conferido em `src/Arch.Cli/`.
+`RuleKit.Cli` é um dotnet tool (`net8.0` e `net10.0`, com roll-forward para runtimes mais novos); o
+comando é `arch-rules`. Exige o runtime .NET 8+ na máquina. Conferido em `src/Arch.Cli/`.
 
 ## Instalar
 
@@ -24,12 +24,15 @@ local com `--add-source <dir-dos-nupkg>`.
 ## Comandos
 
 ```text
-arch-rules gen <caminho-do-yaml> [--out <diretorio>]
-arch-rules validate <caminho-do-yaml>
+arch-rules gen <caminho-do-yaml> [--out <diretorio>] [--strict]
+arch-rules validate <caminho-do-yaml> [--strict]
 arch-rules -h | --help
 ```
 
-Não há outras opções. Parsing feito à mão: um argumento posicional e, no `gen`, só `--out`.
+- `--out <diretorio>` (só `gen`): diretório de saída; padrão: ao lado do YAML.
+- `--strict`: **qualquer** aviso (`ARCH9003`, `ARCH9008`, `ARCH9005` do lock...) vira erro, saída 1. Em
+  `gen`, nada é gerado quando o `--strict` falha.
+- Opção desconhecida (`--xyz`) é erro, saída 1.
 
 ### `validate`
 
@@ -39,7 +42,8 @@ pool, severidades), **sem gerar arquivo**.
 Saída (uma linha por problema):
 
 ```text
-AVISO [ARCH9008] linha 9, coluna 5: Regra 'T-1' (type 'forbidden-call') ignorada: campo obrigatório ausente: 'to'.
+ERRO [ARCH9008] linha 9, coluna 5: Regra 'T-1' (type 'forbidden-call') ignorada: campo obrigatório ausente: 'to'.
+AVISO [ARCH9003] linha 14, coluna 5: ...
 ERRO [ARCH9002] linha 0, coluna 0: Slot 'ARCH0001' duplicado: declarado tanto em 'T-1' quanto em 'T-2'.
 OK: configuração válida.
 ```
@@ -47,15 +51,15 @@ OK: configuração válida.
 | Resultado | Código de saída |
 | --- | --- |
 | `OK: configuração válida.` | **0** |
-| Há linhas `ERRO` (schema `ARCH9001`, slot `ARCH9002`, `CLI-SEVERITY`, `CLI-EXTENDS`) | **1** |
+| Há linhas `ERRO` (schema `ARCH9001`, slot `ARCH9002`, regra malformada `ARCH9008`, `CLI-SEVERITY`, `CLI-EXTENDS`) | **1** |
+| Só `AVISO` (`ARCH9003` tipo desconhecido, `ARCH9005` lock divergente) | **0**, ou **1** com `--strict` |
 | Arquivo não encontrado / uso errado | **1** |
 
-**Atenção, armadilha para CI:** `ARCH9003` (tipo desconhecido), `ARCH9008` (campo ausente/inválido) e a
-divergência do lock saem como `AVISO` e o código de saída continua **0**, mesmo com a regra sendo
-ignorada. Para o CI falhar nesses casos, procure `^AVISO` na saída (exemplo abaixo).
+**Para CI, use `--strict`:** sem ele, `ARCH9003` (um `type` que esta versão não conhece, por exemplo de
+uma versão mais nova da lib) e o lock divergente só avisam e o código de saída fica 0.
 
 Se existir um `arch-rules.lock.yaml` ao lado do YAML, `validate` compara com o que `gen` geraria agora e
-imprime `AVISO [ARCH9005] ... 'arch-rules.lock.yaml' existente diverge ...` (sem falhar). Ele compara só
+imprime `AVISO [ARCH9005] ... 'arch-rules.lock.yaml' existente diverge ...` (falha só com `--strict`). Ele compara só
 o **lock**, não o `.globalconfig`.
 
 ### `gen`
@@ -119,7 +123,7 @@ emite `ARCH9005` (info) apontando a regra. Regra prática: mudou o YAML → `arc
 ## CI: exemplo (GitHub Actions)
 
 Passos verificados localmente com um repositório git de teste (em sincronia: sai 0; YAML alterado sem
-`gen`: falha; regra com chave inválida: falha mesmo com `validate` saindo 0).
+`gen`: falha; regra com chave inválida: falha).
 
 ```yaml
 name: arquitetura
@@ -139,10 +143,7 @@ jobs:
         run: |
           set -euo pipefail
           dotnet tool restore
-          dotnet arch-rules validate src/Acme.Shop/arch-rules.yaml | tee validate.log
-          if grep -q '^AVISO' validate.log; then
-            echo "::error::arch-rules validate emitiu AVISO (regra ignorada ou lock desatualizado)"; exit 1
-          fi
+          dotnet arch-rules validate src/Acme.Shop/arch-rules.yaml --strict
           dotnet arch-rules gen src/Acme.Shop/arch-rules.yaml
           if [ -n "$(git status --porcelain -- src/Acme.Shop/.globalconfig src/Acme.Shop/arch-rules.lock.yaml)" ]; then
             echo "::error::.globalconfig / arch-rules.lock.yaml fora de sincronia; rode 'arch-rules gen' e versione"; exit 1

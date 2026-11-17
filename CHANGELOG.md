@@ -58,6 +58,8 @@ Primeira versão publicada. Entrega o motor de regras arquiteturais completo (fa
   conteúdo) também viram `ARCH9001` com posição.
 - Documentação orientada a consumidor (`README.md`, também o `PackageReadmeFile` dos dois pacotes),
   `CONTRIBUTING.md` e este `CHANGELOG.md`.
+- Skill `skills/rulekit-arch-rules` para assistentes de código (Claude Code e similares) configurarem o
+  RuleKit num projeto consumidor: fluxo guiado, referência do YAML, diagnósticos e CLI/CI.
 
 ### Alterado
 

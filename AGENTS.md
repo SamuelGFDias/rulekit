@@ -103,6 +103,9 @@ build/
                                   # a @(AdditionalFiles) em todo projeto que instale o pacote.
 eng/perf/                        # solução sintética de referência (generate.sh) e medição do orçamento
                                   # de < 5% de overhead (measure.sh); metodologia em eng/perf/README.md
+skills/rulekit-arch-rules/       # skill de agente de IA para QUEM CONSOME os pacotes (SKILL.md + references/:
+                                  # YAML, diagnósticos, CLI/CI). Ao mudar comportamento visível ao consumidor
+                                  # (campos, códigos ARCH9xxx, opções do CLI), atualizar a skill junto.
 docs/schema/arch-rules.v1.json   # JSON Schema (draft 2020-12), $id resolvível em raw.githubusercontent.com,
                                   # alinhado ao RuleTypeCatalog
 .github/workflows/
