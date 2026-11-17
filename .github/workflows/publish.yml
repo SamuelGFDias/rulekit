@@ -3,9 +3,16 @@ name: Publish
 # Publica RuleKit.Analyzer e RuleKit.Cli no nuget.org quando uma tag `v*` é enviada, e cria a
 # GitHub Release com os pacotes anexados. A tag precisa apontar para um commit que já está na main.
 #
+# Dois jobs, de propósito, para o token OIDC nunca conviver com código do repositório:
+#   - `build`   (contents: read)            — checkout, build, testes e pack; entrega só os pacotes.
+#   - `publish` (id-token + contents: write) — NÃO faz checkout nem restore/build: baixa os pacotes
+#     do job anterior, troca o OIDC por uma chave do nuget.org, empurra e cria/atualiza a Release.
+# Assim, nenhum script, target MSBuild ou dependência do repositório roda com `id-token: write`.
+#
 # Trusted Publishing (OIDC): a policy no nuget.org está cadastrada para o repositório
-# SamuelGFDias/rulekit, workflow `publish.yml`, SEM environment — por isso o job não declara
-# `environment:` (declarar um faria o login falhar). Nenhum secret é guardado no repositório.
+# SamuelGFDias/rulekit, workflow `publish.yml`, SEM environment — por isso nenhum job declara
+# `environment:` (declarar um faria o login falhar). O arquivo precisa continuar se chamando
+# `publish.yml`. Nenhum secret é guardado no repositório.
 #
 # A versão vem do MinVer a partir da própria tag (v1.2.3 -> 1.2.3), por isso `fetch-depth: 0`.
 
@@ -13,9 +20,9 @@ on:
   push:
     tags: ['v*']
 
+# Menor privilégio por padrão; o job `publish` eleva o seu.
 permissions:
-  id-token: write   # OIDC para o NuGet/login (Trusted Publishing)
-  contents: write   # gh release create
+  contents: read
 
 env:
   DOTNET_NOLOGO: "true"
@@ -24,10 +31,12 @@ env:
   NUGET_SOURCE: https://api.nuget.org/v3/index.json
 
 jobs:
-  publish:
-    name: Build, testes e publicação
+  build:
+    name: Build, testes e pack
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -45,6 +54,8 @@ jobs:
         with:
           global-json-file: global.json
 
+      # O RuleKit.Cli é multi-target (net8.0;net10.0): o SDK 10 baixa o targeting pack do net8.0 do
+      # nuget.org durante o restore, então não é preciso instalar o SDK 8.
       - name: Restore
         run: dotnet restore RuleKit.sln
 
@@ -74,6 +85,36 @@ jobs:
             fi
           done
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+
+  publish:
+    name: Publicar no nuget.org e na Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write   # OIDC para o NuGet/login (Trusted Publishing)
+      contents: write   # criar/atualizar a GitHub Release
+    steps:
+      # Sem checkout de propósito: este job só manuseia os pacotes já construídos.
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: nupkg
+          path: artifacts
+
+      - name: Listar os pacotes a publicar
+        run: ls -l artifacts
+
       # Troca o token OIDC do GitHub por uma chave de curta duração no nuget.org.
       - name: Login no NuGet (Trusted Publishing)
         id: nuget_login
@@ -97,19 +138,24 @@ jobs:
             --source "$NUGET_SOURCE" \
             --skip-duplicate
 
-      - name: Criar a GitHub Release
+      # Idempotente: se a Release da tag já existe (reexecução do workflow), só reenvia os pacotes
+      # (--clobber) em vez de falhar no `create`. Sem checkout não há repositório git local, então o
+      # `gh` recebe --repo explicitamente.
+      - name: Criar ou atualizar a GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           flags=()
           # Tag com sufixo (v1.0.0-rc.1) é pré-lançamento.
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" --generate-notes "${flags[@]}" artifacts/*
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: nupkg
-          path: |
-            artifacts/*.nupkg
-            artifacts/*.snupkg
-          if-no-files-found: error
+          if view_output=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" 2>&1); then
+            echo "Release $GITHUB_REF_NAME já existe; atualizando os pacotes anexados."
+            gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber --repo "$GITHUB_REPOSITORY"
+          elif grep -qi "release not found" <<<"$view_output"; then
+            gh release create "$GITHUB_REF_NAME" artifacts/* \
+              --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${flags[@]}"
+          else
+            echo "::error::Não foi possível consultar a Release $GITHUB_REF_NAME: $view_output"
+            exit 1
+          fi
