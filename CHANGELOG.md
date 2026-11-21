@@ -8,6 +8,11 @@ git `vX.Y.Z` (MinVer).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-21
+
+Recursos inspirados no [NsDepCop](https://github.com/realvizu/NsDepCop): camadas por assembly,
+placeholders para isolar módulos e baseline de violações para adoção em código legado.
+
 ### Adicionado
 
 - **Critério de camada `assembly`** em `match`/`exclude`: compara o padrão com o nome do assembly que
@@ -131,5 +136,6 @@ Primeira versão publicada. Entrega o motor de regras arquiteturais completo (fa
 - `ARCH9005` ignora `.editorconfig` por árvore e `TreatWarningsAsErrors`.
 - O `RuleKit.Cli` exige runtime .NET 8 ou superior.
 
-[Unreleased]: https://github.com/SamuelGFDias/rulekit/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/SamuelGFDias/rulekit/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/SamuelGFDias/rulekit/releases/tag/v0.2.0
 [0.1.0]: https://github.com/SamuelGFDias/rulekit/releases/tag/v0.1.0
