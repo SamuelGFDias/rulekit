@@ -29,6 +29,9 @@ git `vX.Y.Z` (MinVer).
   `Diagnostic.Properties`. Novo **`ARCH9009`** (Warning) para baseline inválido, com linha/coluna; nesse caso
   nada é suprimido.
 
+- **README: seção "Alternativas"** (#26) comparando com o [NsDepCop](https://github.com/realvizu/NsDepCop)
+  e indicando quando preferir cada um.
+
 ### Alterado
 
 - `when` agora exige que cada nome seja capturado por um critério de `match` da camada `from` **e** por um da

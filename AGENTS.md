@@ -90,11 +90,11 @@ src/
                                   # SarifReader, System.Text.Json): gera/ratcheia/confere o
                                   # arch-rules.baseline.yaml a partir do SARIF do build (#25).
 tests/
-  Arch.Config.Tests/             # parser + catálogo, sem Roslyn — 90 testes
-  Arch.Analyzer.Tests/           # harness (código + config) -> diagnósticos — 84 testes
-  Arch.Rules.Tests/              # testes dos 4 avaliadores — 32 testes
-  Arch.Cli.Tests/                # testes do CLI (gen/validate) — 50 testes
-  Arch.TestHarness/              # compilação in-memory reutilizável — 4 testes próprios
+  Arch.Config.Tests/             # parser + catálogo, sem Roslyn
+  Arch.Analyzer.Tests/           # harness (código + config) -> diagnósticos
+  Arch.Rules.Tests/              # testes dos 4 avaliadores
+  Arch.Cli.Tests/                # testes do CLI (gen/validate/baseline)
+  Arch.TestHarness/              # compilação in-memory reutilizável
   Arch.Benchmarks/               # BenchmarkDotNet (memoização do LayerResolver, cache de config); só compila no CI
   Arch.Dogfood/                  # Arch.Dogfood.Sample consome o analyzer por .nupkg real (não
                                   # ProjectReference) — fora da RuleKit.sln; versão por
@@ -155,17 +155,14 @@ empacotado nos dois `.nupkg`: **só URLs absolutas** (links relativos quebram no
 
 ## 6. Estado atual do projeto
 
-**v0.1.0 pronto para publicação.** Fases 0–4 do `PLANO-implementacao.md` concluídas e o ciclo de
-preparação para o nuget.org fechado (pacotes renomeados, catálogo de tipos, `ARCH9005`/`ARCH9008`
-reais, resolvedor único de `extends`, CI com Windows/VS e perf, publicação por Trusted Publishing,
-README/CHANGELOG/CONTRIBUTING). O que falta é só o ato de release (seção 10): tag `v0.1.0` num commit
-da `main`.
+**v0.1.0 publicada no nuget.org** (tag `v0.1.0` em `e150883`, 2026-11-17). Em preparação para a
+**v0.2.0**: recursos inspirados no NsDepCop: critério de camada `assembly` (#23), placeholders `[Nome]`
+com condição `when` (#24) e baseline de violações via SARIF + `DiagnosticSuppressor` (#25).
 
-Gate verificado (`dotnet test RuleKit.sln -c Release`): **260 testes aprovados, 0 falhas** —
-`Arch.Config.Tests` 90 + `Arch.Analyzer.Tests` 84 + `Arch.Rules.Tests` 32 + `Arch.Cli.Tests` 50 +
-`Arch.TestHarness` 4.
+Gate: `dotnet test RuleKit.sln -c Release`. A contagem por projeto muda a cada entrega; confira no log
+em vez de confiar num número fixo neste arquivo.
 
-Pendências conhecidas (não bloqueiam a v0.1.0):
+Pendências conhecidas:
 - **#1** — live analysis do Visual Studio (Error List durante a digitação) não verificada. O build no
   host .NET Framework do VS já é provado a cada push (job `windows-vs`).
 - **#20** (v2) — erros do motor saem em `RegisterCompilationEndAction`, que pode não rodar na live
