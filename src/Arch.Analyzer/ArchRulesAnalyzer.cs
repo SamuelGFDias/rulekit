@@ -170,6 +170,8 @@ namespace Arch.Analyzer
                 engineDiagnostics.Add(CreateEngineDiagnostic(cached, additionalFile, sourceText, error));
             }
 
+            AddBaselineDiagnostics(context.Options.AdditionalFiles, engineDiagnostics, context.CancellationToken);
+
             if (cached.HasBlockingError || cached.Config == null)
             {
                 // Config inválida invalida tudo: nenhuma ação de regra é registrada, para não
@@ -259,6 +261,44 @@ namespace Arch.Analyzer
             }
 
             ReportAtCompilationEnd(context, engineDiagnostics);
+        }
+
+        /// <summary>
+        /// ARCH9009 (issue #25): baseline presente mas inválido. O <see cref="BaselineSuppressor"/> então não
+        /// suprime nada; aqui o problema vira um aviso ancorado no arquivo, com linha/coluna. Reaproveita a
+        /// análise em cache do suppressor (<see cref="BaselineCache"/>). Sem baseline, nada a fazer.
+        /// </summary>
+        private static void AddBaselineDiagnostics(
+            ImmutableArray<AdditionalText> additionalFiles,
+            List<Diagnostic> engineDiagnostics,
+            CancellationToken cancellationToken)
+        {
+            for (var i = 0; i < additionalFiles.Length; i++)
+            {
+                var file = additionalFiles[i];
+                if (file == null
+                    || !string.Equals(Path.GetFileName(file.Path), BaselineFile.FileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var text = file.GetText(cancellationToken);
+                if (text == null)
+                {
+                    return;
+                }
+
+                var baseline = BaselineCache.Get(text);
+                foreach (var error in baseline.Errors)
+                {
+                    engineDiagnostics.Add(Diagnostic.Create(
+                        ArchDiagnostics.Arch9009,
+                        CreateLocation(file.Path, text, error.Line, error.Column),
+                        error.Message));
+                }
+
+                return;
+            }
         }
 
         private static AdditionalText FindConfigFile(ImmutableArray<AdditionalText> additionalFiles)
@@ -742,7 +782,7 @@ namespace Arch.Analyzer
         /// <paramref name="line"/>/<paramref name="column"/> são 1-based (convenção do parser);
         /// inválidas ou ausentes (0) caem para o início do arquivo.
         /// </summary>
-        private static Location CreateLocation(string path, SourceText sourceText, int line, int column)
+        internal static Location CreateLocation(string path, SourceText sourceText, int line, int column)
         {
             var lines = sourceText.Lines;
             TextSpan span;

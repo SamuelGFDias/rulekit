@@ -93,7 +93,7 @@ estáveis, `ARCH0001`…`ARCH0512`**, e o YAML mapeia o ID de negócio da sua or
   slot: ARCH0007    # identidade técnica — é o que o compilador, o .editorconfig e o #pragma enxergam
 ```
 
-Cada regra precisa de um slot próprio (slot duplicado ou fora do pool → [`ARCH9002`](#diagnósticos-do-motor-arch9001arch9008)).
+Cada regra precisa de um slot próprio (slot duplicado ou fora do pool → [`ARCH9002`](#diagnósticos-do-motor-arch9001arch9009)).
 Quem escolhe o slot é você: o CLI não aloca, só valida. Com isso:
 
 ```ini
@@ -170,7 +170,7 @@ mensagem fixa.
 
 O catálogo é a fonte de verdade do parser (`RuleTypeCatalog`): tipo de regra conhecido com campo
 obrigatório ausente, chave que o tipo não aceita ou valor inválido → regra ignorada com
-[`ARCH9008`](#diagnósticos-do-motor-arch9001arch9008). `type` ignora caixa e espaços nas pontas
+[`ARCH9008`](#diagnósticos-do-motor-arch9001arch9009). `type` ignora caixa e espaços nas pontas
 (`Forbidden-Call` vale `forbidden-call`); os nomes de campo, não.
 
 | `type` | Obrigatórios | Opcionais | Semântica |
@@ -214,7 +214,7 @@ Sem ela o analyzer avisa com `ARCH9006` dizendo qual caminho faltou. O CLI lê o
 cadeia inteira com qualquer nome — então um `validate` verde no CI **não** prova que o analyzer
 enxergou o arquivo.
 
-## Diagnósticos do motor (ARCH9001–ARCH9008)
+## Diagnósticos do motor (ARCH9001–ARCH9009)
 
 A faixa `ARCH9xxx` é reservada aos erros do próprio motor, sempre habilitada por padrão e nunca
 alocável como slot. Pode ser ajustada ou silenciada como qualquer diagnóstico
@@ -230,6 +230,7 @@ alocável como slot. Pode ser ajustada ou silenciada como qualquer diagnóstico
 | `ARCH9006` | Warning | Um caminho de `extends` não tem `AdditionalFile` correspondente. | Aquela camada é ignorada; o resto da cadeia vale. |
 | `ARCH9007` | Warning | Cadeia de `extends` com ciclo ou acima do limite (32 níveis / 64 arquivos). | O ramo problemático é cortado. |
 | `ARCH9008` | Warning | Regra de tipo conhecido com campo obrigatório ausente, chave que o tipo não aceita ou valor inválido (`max` não inteiro, `countBy` fora dos aceitos…). | A regra é ignorada. |
+| `ARCH9009` | Warning | O [`arch-rules.baseline.yaml`](#baseline-de-violações) está inválido (YAML malformado, `schema` diferente de `arch-rules-baseline/v1`, chave desconhecida, item de `entries` sem `rule`/`file`/`subject`). Aponta a linha/coluna. | O baseline não suprime nada até ser corrigido (ou regerado com `arch-rules baseline`). |
 
 `ARCH9005` é `Info`: não aparece no console do `dotnet build` (nem em `-v:d`); para vê-lo, gere um log
 de erros (`dotnet build -p:ErrorLog=build.sarif`).
@@ -267,6 +268,68 @@ dotnet_diagnostic.ARCH0001.severity = error
 O `arch-rules.lock.yaml` é o retrato `id → slot → tipo → severidade → enabled`, para revisar mudanças
 de política em code review. Se ele já existir e divergir do que seria gerado, o `validate` avisa
 (`AVISO [ARCH9005]`, ou erro com `--strict`) pedindo para rodar `gen` de novo — comite os dois arquivos.
+
+## Baseline de violações
+
+Num código legado, ligar uma regra como `error` quebraria o build por violações que já existem. O baseline
+registra essas violações num arquivo versionado e o analyzer **suprime só elas**: o build quebra apenas por
+violação **nova**, e a dívida pode encolher sem nunca voltar a crescer. A supressão fica registrada no SARIF
+(`suppressions`) — não é silêncio.
+
+```bash
+# 1. build com log de erros (SARIF 2.1); na linha de comando do MSBuild a vírgula é escapada: %2C
+dotnet build -p:ErrorLog=build.sarif%2Cversion=2.1
+
+# 2. gera arch-rules.baseline.yaml no diretório do arch-rules.yaml mais próximo de cada violação
+arch-rules baseline build.sarif
+
+# 3. comite o arquivo; a partir daqui só violação nova é reportada (e quebra o build se for error)
+git add arch-rules.baseline.yaml
+
+# 4. no CI, depois do build com ErrorLog: sai 1 se alguma entrada ficou obsoleta (violação corrigida)
+arch-rules baseline build.sarif --check
+
+# 5. para encolher o baseline: remove as entradas obsoletas, nunca acrescenta
+arch-rules baseline build.sarif --update
+```
+
+```text
+arch-rules baseline <sarif>... [--update | --check] [--strict]
+```
+
+| Modo | O que faz |
+|---|---|
+| (sem flag) | Regenera o `arch-rules.baseline.yaml` de cada diretório com **todas** as violações de slot do SARIF (pode acrescentar). |
+| `--update` | Ratchet: mantém só as entradas existentes que ainda aparecem no SARIF; nunca acrescenta. Diretório sem baseline é ignorado. |
+| `--check` | Não escreve nada; sai **1** se alguma entrada de um baseline existente não aparece mais no SARIF (lista as obsoletas), **0** caso contrário. |
+| `--strict` | Qualquer aviso (arquivo-fonte sem `arch-rules.yaml` em nenhum diretório ancestral, resultado sem `archRuleId`/`archSubject`) sai 1 e nada é escrito. |
+
+Aceita vários SARIFs (um por projeto da solução). Cada violação vai para o baseline do diretório ancestral
+mais próximo do arquivo-fonte que contém `arch-rules.yaml`, com o caminho relativo a esse diretório. Um
+baseline só enxerga os diretórios que aparecem no SARIF: se a **última** violação de um projeto for
+corrigida, esse diretório não aparece mais — apague o baseline à mão.
+
+O arquivo (`schema: arch-rules-baseline/v1`, subset de YAML do `arch-rules.yaml`, chave desconhecida é erro)
+tem uma entrada por violação, **sem número de linha**:
+
+```yaml
+schema: arch-rules-baseline/v1
+entries:
+  - rule: "ACME-001"                       # ID de negócio da regra
+    file: "Services/OrderService.cs"       # relativo ao diretório do baseline, com '/'
+    subject: "Acme.Services.OrderService -> Acme.Data.OrderRepository.Load"
+```
+
+O **assunto** (`subject`) é o `archSubject` que os avaliadores gravam em `Diagnostic.Properties` (junto de
+`archRuleId`): `forbidden-call`/`must-route-through` → `<tipo de origem> -> <tipo alvo>.<membro>` (só o tipo
+alvo, na criação de objeto); `naming-convention`/`max-dependencies` → o tipo. Nomes qualificados, sem linha —
+então editar o arquivo não invalida o baseline. Todas as ocorrências iguais (mesma regra, arquivo e assunto)
+são suprimidas, sem contagem.
+
+O `arch-rules.baseline.yaml` entra em `@(AdditionalFiles)` pela convenção `arch-rules.*.yaml` e é lido por
+um `DiagnosticSuppressor` do pacote (suppressors `ARCHB0001`…`ARCHB0512`, um por slot). Baseline ausente → nada
+é suprimido; baseline inválido → nada é suprimido e o analyzer reporta [`ARCH9009`](#diagnósticos-do-motor-arch9001arch9009)
+com a linha/coluna do problema.
 
 ## Limitações conhecidas
 

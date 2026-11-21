@@ -88,6 +88,17 @@ namespace Arch.Analyzer
         /// </summary>
         internal static readonly DiagnosticDescriptor Arch9008;
 
+        /// <summary>Baseline de violações (<c>arch-rules.baseline.yaml</c>) inválido — issue #25.</summary>
+        internal static readonly DiagnosticDescriptor Arch9009;
+
+        /// <summary>
+        /// Um <see cref="SuppressionDescriptor"/> por slot (<c>ARCHB0001</c> suprime <c>ARCH0001</c> …), na ordem do
+        /// pool. IDs de supressão são estáveis: aparecem no SARIF (<c>suppressions</c>) de quem usa o baseline.
+        /// </summary>
+        internal static readonly ImmutableArray<SuppressionDescriptor> BaselineSuppressions;
+
+        private static readonly ImmutableDictionary<string, SuppressionDescriptor> BaselineSuppressionBySlot;
+
         /// <summary>
         /// Tudo que o analyzer pode reportar: os 512 slots + a faixa ARCH9xxx. É exatamente o que
         /// <see cref="Microsoft.CodeAnalysis.Diagnostics.DiagnosticAnalyzer.SupportedDiagnostics"/>
@@ -202,6 +213,35 @@ namespace Arch.Analyzer
                     "aceitos). A regra é ignorada — de forma ruidosa, nunca silenciosa — e as demais continuam valendo " +
                     "(ADR-001 D4).");
 
+            Arch9009 = CreateEngineDescriptor(
+                id: "ARCH9009",
+                title: "Baseline de violações inválido",
+                defaultSeverity: DiagnosticSeverity.Warning,
+                description:
+                    "O arch-rules.baseline.yaml não pôde ser aceito (YAML malformado, `schema` diferente de " +
+                    "`arch-rules-baseline/v1`, chave desconhecida ou item de `entries` incompleto). Enquanto estiver " +
+                    "inválido o baseline não suprime NADA — as violações voltam a ser reportadas com a severidade " +
+                    "configurada — e este aviso aponta a linha/coluna do problema. Regere o arquivo com " +
+                    "`arch-rules baseline`.");
+
+            var suppressions = ImmutableArray.CreateBuilder<SuppressionDescriptor>(SlotCount);
+            var suppressionBySlot = ImmutableDictionary.CreateBuilder<string, SuppressionDescriptor>(StringComparer.Ordinal);
+            for (var number = 1; number <= SlotCount; number++)
+            {
+                var slotId = SlotPool.Format(number);
+                var suppression = new SuppressionDescriptor(
+                    id: "ARCHB" + slotId.Substring(4),
+                    suppressedDiagnosticId: slotId,
+                    justification:
+                        "Violação já registrada no baseline (" + BaselineFile.FileName + ") do projeto; só violações " +
+                        "novas quebram o build. Reduza o baseline com `arch-rules baseline --update`.");
+                suppressions.Add(suppression);
+                suppressionBySlot[slotId] = suppression;
+            }
+
+            BaselineSuppressions = suppressions.MoveToImmutable();
+            BaselineSuppressionBySlot = suppressionBySlot.ToImmutable();
+
             EngineById = ImmutableDictionary.CreateRange(
                 StringComparer.OrdinalIgnoreCase,
                 new[]
@@ -214,6 +254,7 @@ namespace Arch.Analyzer
                     new KeyValuePair<string, DiagnosticDescriptor>(Arch9006.Id, Arch9006),
                     new KeyValuePair<string, DiagnosticDescriptor>(Arch9007.Id, Arch9007),
                     new KeyValuePair<string, DiagnosticDescriptor>(Arch9008.Id, Arch9008),
+                    new KeyValuePair<string, DiagnosticDescriptor>(Arch9009.Id, Arch9009),
                 });
 
             // Ordem explícita (não a de EngineById, que é um dicionário) para que SupportedDiagnostics
@@ -226,7 +267,8 @@ namespace Arch.Analyzer
                 .Add(Arch9005)
                 .Add(Arch9006)
                 .Add(Arch9007)
-                .Add(Arch9008);
+                .Add(Arch9008)
+                .Add(Arch9009);
         }
 
         private static DiagnosticDescriptor CreateEngineDescriptor(
@@ -274,6 +316,17 @@ namespace Arch.Analyzer
         /// ARCH9002 quando não bloqueia, com o código original preservado na mensagem por
         /// <c>ArchRulesAnalyzer</c>.
         /// </summary>
+        internal static bool TryGetBaselineSuppression(string slotId, out SuppressionDescriptor descriptor)
+        {
+            if (string.IsNullOrWhiteSpace(slotId))
+            {
+                descriptor = null;
+                return false;
+            }
+
+            return BaselineSuppressionBySlot.TryGetValue(slotId.Trim(), out descriptor);
+        }
+
         internal static DiagnosticDescriptor GetEngineDescriptorOrFallback(string code, bool isBlocking)
         {
             if (!string.IsNullOrWhiteSpace(code) && EngineById.TryGetValue(code.Trim(), out var descriptor))

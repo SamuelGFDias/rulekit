@@ -106,8 +106,10 @@ namespace Arch.Rules
                 return;
             }
 
+            var properties = ArchDiagnosticProperties.CreateBuilder(rule, TypeName).ToImmutable();
+
             context.RegisterSymbolAction(
-                symbolContext => Analyze(symbolContext, rule, layerResolver, slotDescriptor, layer, countBy, max),
+                symbolContext => Analyze(symbolContext, rule, layerResolver, slotDescriptor, layer, countBy, max, properties),
                 SymbolKind.NamedType);
         }
 
@@ -118,7 +120,8 @@ namespace Arch.Rules
             DiagnosticDescriptor slotDescriptor,
             string layer,
             string countBy,
-            int max)
+            int max,
+            System.Collections.Immutable.ImmutableDictionary<string, string> properties)
         {
             var type = (INamedTypeSymbol)symbolContext.Symbol;
 
@@ -150,6 +153,7 @@ namespace Arch.Rules
             symbolContext.ReportDiagnostic(Diagnostic.Create(
                 slotDescriptor,
                 type.Locations.FirstOrDefault() ?? Location.None,
+                properties.SetItem(ArchDiagnosticProperties.Subject, ArchDiagnosticProperties.SubjectForType(type)),
                 BuildMessage(rule, type.Name, count, max)));
         }
 

@@ -17,7 +17,7 @@ Application/Services.cs(10,14): warning ARCH0004: ACME-004: 'PedidoService' tem 
 
 - A mensagem sempre começa com o **ID de negócio** (`ACME-001:`); o `ARCH0001` é o ID técnico.
 - `Diagnostic.Properties` (para ferramentas e CI): `archRuleId`, `archRuleType`, `archFrom`, `archTo`,
-  `archHelp` (os de `from`/`to`/`help` só nas regras `forbidden-call`/`must-route-through`).
+  `archHelp` (os de `from`/`to` só nas regras `forbidden-call`/`must-route-through`; `archHelp` só se a regra tiver `help`) e **`archSubject`** — o assunto estável da violação (sem linha), usado pelo baseline: `<origem> -> <alvo>.<membro>` em `forbidden-call`/`must-route-through`, o tipo em `naming-convention`/`max-dependencies`.
 - A severidade **padrão** de todo slot é `warning`. A **efetiva** vem do `.globalconfig` gerado por
   `arch-rules gen` (ou de um `.editorconfig`). O descriptor nunca decide política.
 
@@ -38,7 +38,7 @@ rastreável, prefira mudar a `severity` da regra no YAML e rodar `arch-rules gen
 Um `.editorconfig` que muda a severidade de um slot gera **divergência com o YAML** (ver `ARCH9005`
 abaixo, que só enxerga o `.globalconfig`, não o `.editorconfig` por arquivo).
 
-## `ARCH9001`..`ARCH9008`: erros do próprio motor
+## `ARCH9001`..`ARCH9009`: erros do próprio motor
 
 Faixa reservada: sempre habilitada por padrão e **nunca** alocável como slot. Não tem a tag
 `NotConfigurable`, então `#pragma`/`.editorconfig` funcionam nela também (dá para silenciar um aviso do
@@ -54,6 +54,7 @@ motor pontualmente).
 | `ARCH9006` | Warning | Não: a camada ausente é ignorada | Um caminho em `extends:` não está em `@(AdditionalFiles)` | Renomear para `arch-rules.<algo>.yaml` ao lado do `.csproj`, ou adicionar `<AdditionalFiles Include="caminho/base.yaml" />` no `.csproj`. |
 | `ARCH9007` | Warning | Não: o ramo é cortado | Ciclo em `extends` (A estende B que estende A) ou profundidade acima do limite (32 níveis / 64 arquivos) | Quebrar o ciclo / achatar a cadeia. |
 | `ARCH9008` | Warning | Não: a regra é ignorada, **de forma ruidosa** | Regra de `type` conhecido com campo obrigatório ausente, **chave que o tipo não aceita** ou valor inválido (`max` não inteiro/negativo, `countBy` ou `require` fora dos valores aceitos, `when` com forma inválida), ou `when` que cita um nome que não é capturado por um critério de `match` da camada `from` **e** por um da camada `to` | Ler a mensagem: ela lista todos os problemas da regra. Ver a tabela de campos em `yaml-referencia.md`. |
+| `ARCH9009` | Warning | Não: o baseline **não suprime nada** até ser corrigido | `arch-rules.baseline.yaml` inválido: YAML malformado, `schema` diferente de `arch-rules-baseline/v1`, chave desconhecida, item de `entries` sem `rule`/`file`/`subject`. Ancorado em `arch-rules.baseline.yaml(linha,coluna)` | Corrigir o ponto indicado ou regerar com `arch-rules baseline <sarif>`. |
 
 ### Detalhes que importam
 

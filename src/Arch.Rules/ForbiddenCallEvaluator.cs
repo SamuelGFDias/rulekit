@@ -50,15 +50,6 @@ namespace Arch.Rules
         /// <summary>Campo opcional <c>when</c> (issue #24): condição sobre as capturas <c>[Nome]</c> das camadas.</summary>
         public const string WhenKey = RuleFieldNames.When;
 
-        // Chaves de Diagnostic.Properties. ADR-001 §3 (Opção C) exige que o ID de negócio da
-        // organização chegue ao consumidor pela mensagem E por Properties — Properties é o canal
-        // legível por máquina (Code Fix da Fase 3+, relatórios de CI), a mensagem é o canal humano.
-        private const string RuleIdProperty = "archRuleId";
-        private const string RuleTypeProperty = "archRuleType";
-        private const string FromProperty = "archFrom";
-        private const string ToProperty = "archTo";
-        private const string HelpProperty = "archHelp";
-
         public virtual string RuleType
         {
             get { return TypeName; }
@@ -141,7 +132,8 @@ namespace Arch.Rules
 
             INamedTypeSymbol targetType;
             string symbolText;
-            if (!TryGetTarget(operation, out targetType, out symbolText))
+            string memberName;
+            if (!TryGetTarget(operation, out targetType, out symbolText, out memberName))
             {
                 return;
             }
@@ -195,7 +187,9 @@ namespace Arch.Rules
             operationContext.ReportDiagnostic(Diagnostic.Create(
                 slotDescriptor,
                 operation.Syntax.GetLocation(),
-                properties,
+                properties.SetItem(
+                    ArchDiagnosticProperties.Subject,
+                    ArchDiagnosticProperties.SubjectForReference(sourceType, targetType, memberName)),
                 BuildMessage(rule, template, fromLayer, toLayer, symbolText)));
         }
 
@@ -334,10 +328,11 @@ namespace Arch.Rules
         /// classificada pela interface (que é o que a política enxerga como camada), e uma chamada a
         /// método de extensão pela classe estática que a declara.
         /// </summary>
-        private static bool TryGetTarget(IOperation operation, out INamedTypeSymbol targetType, out string symbolText)
+        private static bool TryGetTarget(IOperation operation, out INamedTypeSymbol targetType, out string symbolText, out string memberName)
         {
             targetType = null;
             symbolText = null;
+            memberName = null;
 
             var invocation = operation as IInvocationOperation;
             if (invocation != null)
@@ -350,6 +345,7 @@ namespace Arch.Rules
 
                 targetType = method.ContainingType;
                 symbolText = Describe(targetType, method.Name);
+                memberName = method.Name;
                 return targetType != null;
             }
 
@@ -384,6 +380,7 @@ namespace Arch.Rules
 
                 targetType = property.ContainingType;
                 symbolText = Describe(targetType, property.Name);
+                memberName = property.Name;
                 return targetType != null;
             }
 
@@ -398,6 +395,7 @@ namespace Arch.Rules
 
                 targetType = field.ContainingType;
                 symbolText = Describe(targetType, field.Name);
+                memberName = field.Name;
                 return targetType != null;
             }
 
@@ -566,17 +564,9 @@ namespace Arch.Rules
             string fromLayer,
             string toLayer)
         {
-            var builder = ImmutableDictionary.CreateBuilder<string, string>(StringComparer.Ordinal);
-
-            builder[RuleIdProperty] = rule.Id;
-            builder[RuleTypeProperty] = string.IsNullOrEmpty(rule.Type) ? TypeName : rule.Type;
-            builder[FromProperty] = fromLayer;
-            builder[ToProperty] = toLayer;
-
-            if (!string.IsNullOrEmpty(rule.Help))
-            {
-                builder[HelpProperty] = rule.Help;
-            }
+            var builder = ArchDiagnosticProperties.CreateBuilder(rule, TypeName);
+            builder[ArchDiagnosticProperties.From] = fromLayer;
+            builder[ArchDiagnosticProperties.To] = toLayer;
 
             return builder.ToImmutable();
         }

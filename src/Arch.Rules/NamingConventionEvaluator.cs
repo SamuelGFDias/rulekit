@@ -59,6 +59,8 @@ namespace Arch.Rules
             // específica — e é exatamente isso que faz um `partial class` gerar um único callback
             // (Roslyn funde as declarações parciais num só INamedTypeSymbol antes de disparar a
             // ação de símbolo), em vez de um por arquivo/declaração.
+            var properties = ArchDiagnosticProperties.CreateBuilder(rule, TypeName).ToImmutable();
+
             context.RegisterSymbolAction(
                 symbolContext =>
                 {
@@ -84,6 +86,7 @@ namespace Arch.Rules
                     symbolContext.ReportDiagnostic(Diagnostic.Create(
                         slotDescriptor,
                         symbol.Locations.FirstOrDefault() ?? Location.None,
+                        properties.SetItem(ArchDiagnosticProperties.Subject, ArchDiagnosticProperties.SubjectForType(symbol)),
                         BuildMessage(rule, symbol.Name, kind, value)));
                 },
                 SymbolKind.NamedType);

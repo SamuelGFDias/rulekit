@@ -1,6 +1,6 @@
 ---
 name: rulekit-arch-rules
-description: Use ao instalar e configurar RuleKit.Analyzer (e a ferramenta RuleKit.Cli / `arch-rules`) num projeto .NET, ao escrever ou revisar um `arch-rules.yaml` (camadas, regras `forbidden-call`, `must-route-through`, `naming-convention`, `max-dependencies`), ao gerar o `.globalconfig` e o lock file com `arch-rules gen`, ao ajustar severidade ou silenciar uma regra, ao interpretar diagnósticos `ARCH0001`..`ARCH0512` e `ARCH9001`..`ARCH9008`, ou ao validar a política arquitetural no CI.
+description: Use ao instalar e configurar RuleKit.Analyzer (e a ferramenta RuleKit.Cli / `arch-rules`) num projeto .NET, ao escrever ou revisar um `arch-rules.yaml` (camadas, regras `forbidden-call`, `must-route-through`, `naming-convention`, `max-dependencies`), ao gerar o `.globalconfig` e o lock file com `arch-rules gen`, ao ajustar severidade ou silenciar uma regra, ao interpretar diagnósticos `ARCH0001`..`ARCH0512` e `ARCH9001`..`ARCH9009`, ao registrar as violações existentes num baseline (`arch-rules baseline`) para só quebrar o build por violação nova, ou ao validar a política arquitetural no CI.
 ---
 
 # Skill: RuleKit — configurar regras arquiteturais num projeto .NET
@@ -13,9 +13,9 @@ Carregue só o que a tarefa pedir:
 
 - [`references/yaml-referencia.md`](references/yaml-referencia.md): schema completo do YAML (camadas,
   critérios, os 4 tipos de regra e cada campo), `extends`, e um exemplo completo e validado.
-- [`references/diagnosticos.md`](references/diagnosticos.md): `ARCH0xxx` (violações) e `ARCH9001`..`ARCH9008`
+- [`references/diagnosticos.md`](references/diagnosticos.md): `ARCH0xxx` (violações) e `ARCH9001`..`ARCH9009`
   (erros do motor), causa e correção, como silenciar.
-- [`references/cli-e-ci.md`](references/cli-e-ci.md): `arch-rules gen`/`validate`, arquivos gerados e um
+- [`references/cli-e-ci.md`](references/cli-e-ci.md): `arch-rules gen`/`validate`/`baseline`, arquivos gerados e um
   job de CI.
 
 ## Como a lib pensa (leia uma vez)
@@ -146,6 +146,22 @@ dotnet build
 Rode `arch-rules validate --strict` e confira que o `.globalconfig` e o lock gerados
 estão em sincronia com o YAML. Job completo em `references/cli-e-ci.md`.
 
+## Passo 8 (código legado): baseline de violações
+
+Se o projeto já tem violações e a regra deve valer como `error` só para o que for **novo**, registre as
+existentes num baseline (`arch-rules.baseline.yaml`); um `DiagnosticSuppressor` do pacote as suprime e a
+supressão fica no SARIF. Fluxo (detalhes e CI em `references/cli-e-ci.md`):
+
+```bash
+dotnet build -p:ErrorLog=build.sarif%2Cversion=2.1    # a vírgula é escapada (%2C) na linha do MSBuild
+dotnet arch-rules baseline build.sarif                # gera o baseline ao lado do arch-rules.yaml; comite
+dotnet arch-rules baseline build.sarif --check        # CI: sai 1 se uma entrada ficou obsoleta
+dotnet arch-rules baseline build.sarif --update       # encolhe: remove as obsoletas, nunca acrescenta
+```
+
+O baseline só vale para o diretório do `arch-rules.yaml` mais próximo da violação; baseline inválido →
+`ARCH9009` e nada é suprimido. Não o gere sem o usuário concordar: ele aceita a dívida atual.
+
 ## Armadilhas (e o porquê)
 
 - **Slot fora de `ARCH0001`–`ARCH0512` ou repetido** → `ARCH9002`: a regra é ignorada. Dois IDs no mesmo
@@ -174,6 +190,10 @@ estão em sincronia com o YAML. Job completo em `references/cli-e-ci.md`.
   uma violação; chamar pela interface só é pega se a interface também estiver na camada de destino.
 - **`must-route-through` não verifica a rota** `from → through → to`: é `forbidden-call` de `from` para
   `to` com `through` na mensagem.
+- **Baseline** (`arch-rules.baseline.yaml`): casa por regra + arquivo + assunto, **sem linha**; todas as
+  ocorrências iguais são suprimidas. O SARIF precisa vir de um build com o analyzer desta versão (traz
+  `archRuleId`/`archSubject`); se a **última** violação de um projeto for corrigida, o `--check`/`--update`
+  não vê mais o diretório — apague o baseline à mão.
 - **`message:`** só é usado por `forbidden-call` e `must-route-through`; os outros dois ignoram.
 - **Silenciar/ajustar por regra** funciona por slot: `#pragma warning disable ARCH0007` e
   `dotnet_diagnostic.ARCH0007.severity = none` num `.editorconfig`. Preferível: mudar `severity`/`enabled`
