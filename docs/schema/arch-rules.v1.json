@@ -285,7 +285,7 @@
         },
         "when": {
           "type": "object",
-          "description": "Usado por forbidden-call e must-route-through (OPCIONAL): condicao sobre as capturas '[Nome]' das camadas 'from' e 'to'. Exatamente uma chave: 'same' (so reporta quando todos os valores capturados sao iguais nos dois lados) ou 'differ' (so reporta quando ao menos um difere); o valor e a lista de nomes (um escalar solto vale como lista de um item). Lado sem a captura: a regra nao se aplica ao par. Nome nao capturado por nenhum criterio de match das camadas from e to gera ARCH9008 (regra ignorada).",
+          "description": "Usado por forbidden-call e must-route-through (OPCIONAL): condicao sobre as capturas '[Nome]' das camadas 'from' e 'to'. Exatamente uma chave: 'same' (so reporta quando todos os valores capturados sao iguais nos dois lados) ou 'differ' (so reporta quando ao menos um difere); o valor e a lista de nomes (um escalar solto vale como lista de um item). Lado sem a captura: a regra nao se aplica ao par. Nome que nao seja capturado por um criterio de match da camada from E por um da camada to gera ARCH9008 (regra ignorada).",
           "additionalProperties": false,
           "minProperties": 1,
           "maxProperties": 1,

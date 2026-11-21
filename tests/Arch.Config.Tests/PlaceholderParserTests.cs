@@ -271,22 +271,28 @@ rules:
             Assert.Equal("ARCH9008", Assert.Single(result.Errors).Code);
         }
 
-        [Fact]
-        public void When_com_nome_capturado_so_pela_camada_to_e_aceito()
+        [Theory]
+        [InlineData("Acme.Services.**", "Acme.[Module].Domain.**", "to")]   // capturado só pela camada 'to'
+        [InlineData("Acme.[Module].Services.**", "Acme.Domain.**", "from")] // capturado só pela camada 'from'
+        public void When_com_nome_capturado_so_por_um_dos_lados_e_ARCH9008(string fromNs, string toNs, string capturingSide)
         {
-            // Regra do contrato: ARCH9008 só quando NENHUMA das duas camadas captura o nome.
-            var yaml = Header + @"
+            // Contrato do #24: o nome precisa ser capturado pela camada 'from' E pela camada 'to'.
+            var yaml = Header + $@"
 layers:
   ModuleServices:
-    match: [ { namespace: ""Acme.Services.**"" } ]
+    match: [ {{ namespace: ""{fromNs}"" }} ]
   ModuleDomain:
-    match: [ { namespace: ""Acme.[Module].Domain.**"" } ]
+    match: [ {{ namespace: ""{toNs}"" }} ]
 rules:" + Rule("{ differ: [Module] }");
 
             var result = ArchConfigParser.Parse(yaml);
 
-            Assert.Empty(result.Errors);
-            Assert.Single(result.Config.Rules);
+            Assert.Empty(result.Config.Rules);
+            var error = Assert.Single(result.Errors);
+            Assert.Equal("ARCH9008", error.Code);
+            Assert.False(error.IsBlocking);
+            Assert.Contains("Module", error.Message);
+            Assert.Contains(capturingSide == "to" ? "'ModuleServices'" : "'ModuleDomain'", error.Message);
         }
 
         [Fact]
