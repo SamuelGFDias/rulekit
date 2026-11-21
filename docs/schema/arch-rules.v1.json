@@ -60,7 +60,7 @@
   "$defs": {
     "matchCriterion": {
       "type": "object",
-      "description": "Um criterio de match/exclude de camada. Deve ter EXATAMENTE UMA das chaves namespace/nameSuffix/baseType/implements/attribute (ADR-001 D2). Multiplos criterios na mesma lista sao combinados por OR.",
+      "description": "Um criterio de match/exclude de camada. Deve ter EXATAMENTE UMA das chaves namespace/nameSuffix/baseType/implements/attribute/assembly (ADR-001 D2). Multiplos criterios na mesma lista sao combinados por OR.",
       "additionalProperties": false,
       "properties": {
         "namespace": {
@@ -82,6 +82,10 @@
         "attribute": {
           "type": "string",
           "description": "Nome totalmente qualificado do atributo aplicado ao tipo, resolvido via GetTypeByMetadataName. Nao resolvido gera ARCH9004 (warning) e o criterio e ignorado."
+        },
+        "assembly": {
+          "type": "string",
+          "description": "Padrao do nome do assembly que contem o tipo (ContainingAssembly.Identity.Name), com a mesma semantica de curinga do namespace: '*' (um segmento), '**' (zero ou mais), sem curinga = nome exato. Ex.: 'Acme.Infrastructure.**'."
         }
       },
       "oneOf": [
@@ -108,6 +112,11 @@
         {
           "required": [
             "attribute"
+          ]
+        },
+        {
+          "required": [
+            "assembly"
           ]
         }
       ]

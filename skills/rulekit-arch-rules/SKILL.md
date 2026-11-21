@@ -101,7 +101,7 @@ schema: arch-rules/v1
 
 Monte, nesta ordem, com o que o usuário respondeu no Passo 2:
 
-1. `layers`: nome livre → `match` (critérios `namespace`/`nameSuffix`/`baseType`/`implements`/`attribute`,
+1. `layers`: nome livre → `match` (critérios `namespace`/`nameSuffix`/`baseType`/`implements`/`attribute`/`assembly`,
    **combinados por OR**) e `exclude` opcional (vence o match).
 2. `severities` (nomes da organização → `error`/`warning`/`suggestion`/`silent`/`none`) e
    `defaults.severity`.

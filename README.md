@@ -136,10 +136,13 @@ customizadas**; chave desconhecida é erro, não silêncio. Arquivos acima de **
 | `rules` | sim | Lista de regras. |
 
 **Camadas.** Cada item de `match`/`exclude` tem exatamente **uma** chave: `namespace`, `nameSuffix`,
-`baseType`, `implements` ou `attribute`. Itens da mesma lista combinam por **OU**; `exclude` é
+`baseType`, `implements`, `attribute` ou `assembly`. Itens da mesma lista combinam por **OU**; `exclude` é
 aplicado depois do `match`. `namespace` aceita `*` (exatamente um segmento) e `**` (zero ou mais):
 `Acme.Api.**` casa `Acme.Api` e `Acme.Api.Controllers.V2`, e um namespace sem curinga casa só ele
-mesmo, nunca os descendentes. `baseType`/`implements`/`attribute` pedem o nome totalmente
+mesmo, nunca os descendentes. `assembly` compara o padrão com o nome do assembly que contém o tipo
+(`ContainingAssembly.Identity.Name`, também para tipos vindos de referências), com a mesma semântica de
+curinga do `namespace` — assim as regras existentes valem entre projetos
+(`assembly: "Acme.Infrastructure.**"`). `baseType`/`implements`/`attribute` pedem o nome totalmente
 qualificado; um nome que não resolve na compilação gera `ARCH9004` e o critério é ignorado.
 
 **Severidades.** Os nomes são livres (`bloqueante`, `aviso`…); os valores são só os cinco que o

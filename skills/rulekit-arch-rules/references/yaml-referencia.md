@@ -72,6 +72,7 @@ com **exatamente uma** chave de critério (zero ou duas → `ARCH9001`).
 | `baseType` | algum ancestral na cadeia de herança é esse tipo | nome totalmente qualificado de metadata (`Microsoft.AspNetCore.Mvc.ControllerBase`). Genérico leva a aridade: `Acme.Base`1`. |
 | `implements` | o tipo implementa a interface (inclui herdadas transitivamente) | mesmo formato de nome. Uma interface **não** "implementa" a si mesma. |
 | `attribute` | o tipo tem esse atributo aplicado | o nome é o da classe do atributo, **com** o sufixo `Attribute` (`Acme.AggregateRootAttribute`). |
+| `assembly` | o nome do assembly que contém o tipo bate com o padrão | `ContainingAssembly.Identity.Name`, também para tipos de referências (metadata). Mesma semântica de curinga do `namespace` (`*` = um segmento, `**` = zero ou mais, sem curinga = nome exato). Permite isolar projetos: `assembly: "Acme.Infrastructure.**"`. |
 
 Pontos que costumam enganar:
 

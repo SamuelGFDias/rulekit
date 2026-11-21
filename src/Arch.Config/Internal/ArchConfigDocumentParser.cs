@@ -47,7 +47,7 @@ namespace Arch.Config.Internal
 
         private static readonly HashSet<string> AllowedCriterionKeys = new HashSet<string>(StringComparer.Ordinal)
         {
-            "namespace", "nameSuffix", "baseType", "implements", "attribute"
+            "namespace", "nameSuffix", "baseType", "implements", "attribute", "assembly"
         };
 
         private static readonly HashSet<string> AllowedRuleCoreKeys = new HashSet<string>(StringComparer.Ordinal)
@@ -346,7 +346,7 @@ namespace Arch.Config.Internal
                     return false;
                 }
 
-                string ns = null, suffix = null, baseType = null, implementsName = null, attribute = null;
+                string ns = null, suffix = null, baseType = null, implementsName = null, attribute = null, assemblyName = null;
                 var filled = 0;
 
                 foreach (var kv in itemMap.Children)
@@ -374,6 +374,7 @@ namespace Arch.Config.Internal
                         case "baseType": baseType = value; break;
                         case "implements": implementsName = value; break;
                         case "attribute": attribute = value; break;
+                        case "assembly": assemblyName = value; break;
                     }
                 }
 
@@ -386,7 +387,7 @@ namespace Arch.Config.Internal
                     return false;
                 }
 
-                list.Add(new LayerMatchCriterion(ns, suffix, baseType, implementsName, attribute));
+                list.Add(new LayerMatchCriterion(ns, suffix, baseType, implementsName, attribute, assemblyName));
             }
 
             criteria = list;

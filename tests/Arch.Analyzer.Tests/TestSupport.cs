@@ -49,12 +49,17 @@ namespace Arch.Analyzer.Tests
         /// compilar — um símbolo que não existe classificaria "corretamente" em camada nenhuma e
         /// daria um teste verde sem valor.
         /// </summary>
-        internal static CSharpCompilation Create(string source, string assemblyName = "ArchLayerResolverSample")
+        internal static CSharpCompilation Create(
+            string source,
+            string assemblyName = "ArchLayerResolverSample",
+            params MetadataReference[] extraReferences)
         {
             var compilation = CSharpCompilation.Create(
                 assemblyName,
                 new[] { CSharpSyntaxTree.ParseText(source) },
-                References,
+                extraReferences == null || extraReferences.Length == 0
+                    ? References
+                    : References.AddRange(extraReferences),
                 new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
             var errors = compilation.GetDiagnostics()
@@ -97,6 +102,8 @@ namespace Arch.Analyzer.Tests
     internal static class TestConfigs
     {
         internal static LayerMatchCriterion Namespace(string glob) => new LayerMatchCriterion(@namespace: glob);
+
+        internal static LayerMatchCriterion Assembly(string glob) => new LayerMatchCriterion(assembly: glob);
 
         internal static LayerMatchCriterion NameSuffix(string suffix) => new LayerMatchCriterion(nameSuffix: suffix);
 
