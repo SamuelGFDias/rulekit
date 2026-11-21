@@ -29,18 +29,28 @@ namespace Arch.Config
         /// <summary>Nome totalmente qualificado de um atributo aplicado ao tipo.</summary>
         public string Attribute { get; }
 
+        /// <summary>
+        /// Padrão do nome do assembly que contém o tipo (<c>ContainingAssembly.Identity.Name</c>),
+        /// ex.: "Acme.Infrastructure.**". Mesma semântica de curinga de <see cref="Namespace"/>
+        /// (<c>*</c> = um segmento, <c>**</c> = zero ou mais, sem curinga = nome exato); os segmentos
+        /// são os separados por ponto no nome do assembly.
+        /// </summary>
+        public string Assembly { get; }
+
         public LayerMatchCriterion(
             string @namespace = null,
             string nameSuffix = null,
             string baseType = null,
             string implements = null,
-            string attribute = null)
+            string attribute = null,
+            string assembly = null)
         {
             Namespace = @namespace;
             NameSuffix = nameSuffix;
             BaseType = baseType;
             Implements = implements;
             Attribute = attribute;
+            Assembly = assembly;
         }
     }
 

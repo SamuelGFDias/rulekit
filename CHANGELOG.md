@@ -8,6 +8,13 @@ git `vX.Y.Z` (MinVer).
 
 ## [Unreleased]
 
+### Adicionado
+
+- **Critério de camada `assembly`** em `match`/`exclude`: compara o padrão com o nome do assembly que
+  contém o tipo (`ContainingAssembly.Identity.Name`, inclusive tipos de metadata), com a mesma semântica
+  de curinga do `namespace` (`*`, `**`, nome exato). As regras existentes passam a valer entre projetos
+  (#23).
+
 ## [0.1.0] - 2026-11-17
 
 Primeira versão publicada. Entrega o motor de regras arquiteturais completo (fases 0–4 do

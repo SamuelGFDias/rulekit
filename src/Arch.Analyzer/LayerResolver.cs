@@ -38,6 +38,9 @@ namespace Arch.Analyzer
 
         private readonly CompiledLayer[] _layers;
 
+        /// <summary>true se algum critério usa `assembly` — evita quebrar o nome do assembly à toa.</summary>
+        private readonly bool _usesAssembly;
+
         /// <summary>
         /// Memoização símbolo→camadas (ADR-001 §5). A chave é <see cref="ISymbol"/>, e não
         /// <see cref="INamedTypeSymbol"/>, por uma restrição real do BCL:
@@ -57,6 +60,15 @@ namespace Arch.Analyzer
         private LayerResolver(CompiledLayer[] layers)
         {
             _layers = layers;
+            for (var i = 0; i < layers.Length; i++)
+            {
+                if (layers[i].Match.UsesAssembly || layers[i].Exclude.UsesAssembly)
+                {
+                    _usesAssembly = true;
+                    break;
+                }
+            }
+
             _classify = symbol => Classify((INamedTypeSymbol)symbol);
         }
 
@@ -187,20 +199,21 @@ namespace Arch.Analyzer
         private string[] Classify(INamedTypeSymbol symbol)
         {
             var namespaceSegments = GetNamespaceSegments(symbol);
+            var assemblySegments = _usesAssembly ? GetAssemblySegments(symbol) : NoNamespaceSegments;
             List<string> matched = null;
 
             for (var i = 0; i < _layers.Length; i++)
             {
                 var layer = _layers[i];
 
-                if (!layer.Match.Matches(symbol, namespaceSegments))
+                if (!layer.Match.Matches(symbol, namespaceSegments, assemblySegments))
                 {
                     continue;
                 }
 
                 // `exclude` é avaliado DEPOIS do match e tem a palavra final (ADR-001 D2): um símbolo
                 // que casa em `match` e também em `exclude` não pertence à camada.
-                if (layer.Exclude.Matches(symbol, namespaceSegments))
+                if (layer.Exclude.Matches(symbol, namespaceSegments, assemblySegments))
                 {
                     continue;
                 }
@@ -243,6 +256,17 @@ namespace Arch.Analyzer
             return segments;
         }
 
+        /// <summary>
+        /// Segmentos (separados por ponto) de <c>ContainingAssembly.Identity.Name</c>. Funciona igual
+        /// para tipos de código-fonte e de metadata. Sem assembly (não ocorre em tipos reais):
+        /// nenhum segmento, e portanto nenhum critério `assembly` casa.
+        /// </summary>
+        private static string[] GetAssemblySegments(INamedTypeSymbol symbol)
+        {
+            var name = symbol.ContainingAssembly?.Identity.Name;
+            return string.IsNullOrEmpty(name) ? NoNamespaceSegments : name.Split('.');
+        }
+
         private sealed class CompiledLayer
         {
             internal readonly string Name;
@@ -266,25 +290,34 @@ namespace Arch.Analyzer
             private static readonly INamedTypeSymbol[] NoTypes = new INamedTypeSymbol[0];
 
             private readonly NamespaceTrie _namespaces;
+            private readonly NamespaceTrie _assemblies;
             private readonly string[] _nameSuffixes;
             private readonly INamedTypeSymbol[] _baseTypes;
             private readonly INamedTypeSymbol[] _interfaces;
             private readonly INamedTypeSymbol[] _attributes;
             private readonly bool _isEmpty;
 
+            internal bool UsesAssembly
+            {
+                get { return !_assemblies.IsEmpty; }
+            }
+
             private CompiledCriteria(
                 NamespaceTrie namespaces,
+                NamespaceTrie assemblies,
                 string[] nameSuffixes,
                 INamedTypeSymbol[] baseTypes,
                 INamedTypeSymbol[] interfaces,
                 INamedTypeSymbol[] attributes)
             {
                 _namespaces = namespaces;
+                _assemblies = assemblies;
                 _nameSuffixes = nameSuffixes;
                 _baseTypes = baseTypes;
                 _interfaces = interfaces;
                 _attributes = attributes;
                 _isEmpty = namespaces.IsEmpty
+                    && assemblies.IsEmpty
                     && nameSuffixes.Length == 0
                     && baseTypes.Length == 0
                     && interfaces.Length == 0
@@ -296,6 +329,7 @@ namespace Arch.Analyzer
                 Func<string, INamedTypeSymbol> resolve)
             {
                 var namespaces = new NamespaceTrie();
+                var assemblies = new NamespaceTrie();
                 List<string> suffixes = null;
                 List<INamedTypeSymbol> baseTypes = null;
                 List<INamedTypeSymbol> interfaces = null;
@@ -316,6 +350,11 @@ namespace Arch.Analyzer
                             namespaces.Add(criterion.Namespace.Trim());
                         }
 
+                        if (!string.IsNullOrWhiteSpace(criterion.Assembly))
+                        {
+                            assemblies.Add(criterion.Assembly.Trim());
+                        }
+
                         if (!string.IsNullOrWhiteSpace(criterion.NameSuffix))
                         {
                             (suffixes ?? (suffixes = new List<string>(2))).Add(criterion.NameSuffix.Trim());
@@ -329,6 +368,7 @@ namespace Arch.Analyzer
 
                 return new CompiledCriteria(
                     namespaces,
+                    assemblies,
                     suffixes == null ? new string[0] : suffixes.ToArray(),
                     baseTypes == null ? NoTypes : baseTypes.ToArray(),
                     interfaces == null ? NoTypes : interfaces.ToArray(),
@@ -356,7 +396,7 @@ namespace Arch.Analyzer
                 (target ?? (target = new List<INamedTypeSymbol>(2))).Add(resolved);
             }
 
-            internal bool Matches(INamedTypeSymbol symbol, string[] namespaceSegments)
+            internal bool Matches(INamedTypeSymbol symbol, string[] namespaceSegments, string[] assemblySegments)
             {
                 if (_isEmpty)
                 {
@@ -364,6 +404,11 @@ namespace Arch.Analyzer
                 }
 
                 if (_namespaces.Matches(namespaceSegments))
+                {
+                    return true;
+                }
+
+                if (_assemblies.Matches(assemblySegments))
                 {
                     return true;
                 }
