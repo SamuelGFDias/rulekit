@@ -205,7 +205,7 @@ extends:
   do mais específico vence.
 - Os caminhos são relativos ao arquivo que os declara.
 - O analyzer não lê disco: só enxerga `@(AdditionalFiles)`. O pacote inclui automaticamente
-  `arch-rules.yaml` e `arch-rules.*.yaml` **ao lado do `.csproj`** (menos `arch-rules.lock.yaml`). Um
+  `arch-rules.yaml` e `arch-rules.*.yaml` **ao lado do `.csproj`** (menos `arch-rules.lock.yaml`; o `arch-rules.baseline.yaml` do `arch-rules baseline` também casa o glob, mas é lido só pelo suppressor, nunca como política ou `extends`). Um
   arquivo base com outro nome ou em outra pasta precisa de `<AdditionalFiles Include="..." />` manual no
   `.csproj`, senão `ARCH9006` (warning: a camada ausente é ignorada).
 - Ciclo ou profundidade acima do limite (32 níveis / 64 arquivos) → `ARCH9007` (warning, o ramo é cortado).

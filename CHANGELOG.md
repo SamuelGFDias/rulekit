@@ -19,6 +19,21 @@ git `vX.Y.Z` (MinVer).
   módulos sem uma regra por par (`Acme.[Module].Services.**` não chama `Acme.[Module].Domain.**` de outro
   módulo). Placeholder malformado/repetido → `ARCH9001`; `when` com nome que não seja capturado pela camada `from` **e** pela `to` → `ARCH9008`.
   `ILayerResolver.GetCaptures` expõe as capturas (#24).
+- **Baseline de violações** (#25): `arch-rules baseline <sarif>... [--update | --check] [--strict]` gera
+  `arch-rules.baseline.yaml` (`schema: arch-rules-baseline/v1`) a partir do log SARIF do build
+  (`-p:ErrorLog=build.sarif%2Cversion=2.1`), no diretório do `arch-rules.yaml` mais próximo de cada violação,
+  com uma entrada `{ rule, file, subject }` por violação, sem número de linha. `--update` é o ratchet (só
+  remove) e `--check` sai 1 com entrada obsoleta (CI). Um `DiagnosticSuppressor` do pacote (`ARCHB0001`…
+  `ARCHB0512`) suprime os diagnósticos de slot que casam; a supressão aparece no SARIF. Os avaliadores passam a
+  gravar `archSubject` (e, em `naming-convention`/`max-dependencies`, também `archRuleId`/`archRuleType`) em
+  `Diagnostic.Properties`. Novo **`ARCH9009`** (Warning) para baseline inválido, com linha/coluna; nesse caso
+  nada é suprimido.
+
+### Alterado
+
+- `when` agora exige que cada nome seja capturado por um critério de `match` da camada `from` **e** por um da
+  camada `to`; antes bastava uma das duas (#24). A regra que citar um nome ausente de um dos lados é
+  descartada com `ARCH9008`.
 
 ## [0.1.0] - 2026-11-17
 

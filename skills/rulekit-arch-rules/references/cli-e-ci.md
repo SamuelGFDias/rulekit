@@ -26,6 +26,7 @@ local com `--add-source <dir-dos-nupkg>`.
 ```text
 arch-rules gen <caminho-do-yaml> [--out <diretorio>] [--strict]
 arch-rules validate <caminho-do-yaml> [--strict]
+arch-rules baseline <sarif>... [--update | --check] [--strict]
 arch-rules -h | --help
 ```
 
@@ -112,6 +113,50 @@ rules:
 
 Versione os **dois** arquivos. O lock **não** é uma camada de `extends` (o pacote o exclui de
 `@(AdditionalFiles)`).
+
+### `baseline`
+
+Registra as violações **existentes** para que só as novas quebrem o build (o analyzer não faz I/O e o CLI
+não compila, então a fonte é o log SARIF do build):
+
+```bash
+dotnet build -p:ErrorLog=build.sarif%2Cversion=2.1     # %2C = vírgula escapada na linha do MSBuild
+dotnet arch-rules baseline build.sarif                 # escreve arch-rules.baseline.yaml; comite
+```
+
+Aceita vários SARIFs. Considera só resultados de slot (`ARCH0001`..`ARCH0512`), suprimidos ou não, com
+`archRuleId`/`archSubject` (em `properties.customProperties`); agrupa cada um no diretório ancestral mais
+próximo do arquivo-fonte que contém `arch-rules.yaml`, com caminho relativo a ele. Resultado sem esse
+ancestral → `AVISO` e ignorado.
+
+| Modo | Efeito | Saída |
+| --- | --- | --- |
+| (sem flag) | Regenera o baseline de cada diretório com **todos** os resultados (pode acrescentar). | 0 |
+| `--update` | Ratchet: mantém só as entradas existentes que ainda aparecem; **nunca acrescenta**; diretório sem baseline é ignorado. | 0 (1 se um baseline existente é inválido) |
+| `--check` | Não escreve; lista as entradas obsoletas. | **1** se alguma entrada de baseline existente não aparece mais; 0 caso contrário |
+| `--strict` | Aviso (fonte sem `arch-rules.yaml`, resultado sem `archRuleId`/`archSubject`) vira erro; nada é escrito. | 1 |
+
+`--update` e `--check` juntos é erro de uso (saída 1). Baseline existente inválido em `--update`/`--check`
+→ `ERRO ... [ARCH9009]`, saída 1. Limite conhecido: só os diretórios que aparecem no SARIF são
+verificados; quando a última violação de um projeto é corrigida o diretório some do SARIF — apague o
+baseline à mão.
+
+Formato do arquivo (`schema: arch-rules-baseline/v1`, subset de YAML do `arch-rules.yaml`, chave
+desconhecida é erro, escrito de forma determinística — ordenado por arquivo, regra e assunto):
+
+```yaml
+schema: arch-rules-baseline/v1
+entries:
+  - rule: "ACME-001"                 # ID de negócio
+    file: "Services/OrderService.cs" # relativo ao diretório do baseline, com '/'
+    subject: "Acme.Services.OrderService -> Acme.Data.OrderRepository.Load"
+```
+
+`subject` = `archSubject`: `forbidden-call`/`must-route-through` → `<origem> -> <alvo>.<membro>` (só o
+alvo na criação de objeto); `naming-convention`/`max-dependencies` → o tipo. O arquivo entra em
+`@(AdditionalFiles)` pela convenção `arch-rules.*.yaml` e um `DiagnosticSuppressor` do pacote
+(`ARCHB0001`..`ARCHB0512`) suprime o que casa; a supressão aparece no SARIF. CI típico: build com
+`ErrorLog` → `arch-rules baseline build.sarif --check`.
 
 ## Por que a severidade vive no `.globalconfig`
 

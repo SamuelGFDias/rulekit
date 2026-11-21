@@ -64,14 +64,18 @@ src/
                                   # continuam Arch.Analyzer). ArchRulesAnalyzer, pool de 512 descriptors
                                   # (ARCH0001..ARCH0512) + faixa ARCH9xxx (ArchDiagnostics),
                                   # LayerResolver/NamespaceTrie, RuleEvaluatorRegistry (despacho),
-                                  # SeverityDivergence (ARCH9005). EnforceExtendedAnalyzerRules ligado
-                                  # (RS1035: sem I/O).
-  Arch.Analyzer.Contracts/       # netstandard2.0 — IRuleEvaluator/ILayerResolver. Projeto próprio para
-                                  # evitar ciclo Arch.Analyzer <-> Arch.Rules (ver seção 8).
+                                  # SeverityDivergence (ARCH9005), BaselineSuppressor (DiagnosticSuppressor
+                                  # do baseline, #25) + BaselineCache (análise por instância de SourceText,
+                                  # compartilhada com o analyzer, que reporta o ARCH9009).
+                                  # EnforceExtendedAnalyzerRules ligado (RS1035: sem I/O).
+  Arch.Analyzer.Contracts/       # netstandard2.0 — IRuleEvaluator/ILayerResolver e ArchDiagnosticProperties
+                                  # (chaves de Diagnostic.Properties + formato do archSubject). Projeto próprio
+                                  # para evitar ciclo Arch.Analyzer <-> Arch.Rules (ver seção 8).
   Arch.Config/                   # netstandard2.0, sem Roslyn — modelo (ArchConfig/LayerDefinition/
                                   # LayerMatchCriterion/RuleDefinition/RulePropertyValue),
                                   # ArchConfigParser (YamlDotNet, em Internal/), RuleTypeCatalog,
-                                  # SlotPool, SeverityVocabulary, ExtendsChainResolver.
+                                  # SlotPool, SeverityVocabulary, ExtendsChainResolver, BaselineFile
+                                  # (modelo + parser + writer do arch-rules.baseline.yaml, #25).
   Arch.Rules/                    # netstandard2.0 — um IRuleEvaluator por arquivo: ForbiddenCall,
                                   # MustRouteThrough (herda do anterior), NamingConvention,
                                   # MaxDependencies. Referencia só Contracts + Config.
@@ -82,6 +86,9 @@ src/
                                   # disco (ExtendsResolver = loader de disco sobre ExtendsChainResolver),
                                   # validam schema/slots/severidades e `gen` escreve .globalconfig e
                                   # arch-rules.lock.yaml. Sem dependência direta de YamlDotNet.
+                                  # `baseline <sarif>... [--update | --check] [--strict]` (BaselineCommand +
+                                  # SarifReader, System.Text.Json): gera/ratcheia/confere o
+                                  # arch-rules.baseline.yaml a partir do SARIF do build (#25).
 tests/
   Arch.Config.Tests/             # parser + catálogo, sem Roslyn — 90 testes
   Arch.Analyzer.Tests/           # harness (código + config) -> diagnósticos — 84 testes
@@ -247,10 +254,27 @@ fixa contratos compartilhados (interfaces, trechos do ADR) no prompt de cada del
   regra, no compilation-start; o CLI `validate` tem um aviso análogo quando o lock file diverge),
   `ARCH9006` (`extends` sem `AdditionalFile`, `Warning`), `ARCH9007` (ciclo/profundidade em `extends`,
   `Warning`), **`ARCH9008`** (regra de tipo conhecido com campo ausente/desconhecido/inválido,
-  `Warning`, regra ignorada; emitido pelo parser). `ARCH9006`/`ARCH9007`/`ARCH9005` são reportados só
-  pelo analyzer (descrevem a resolução contra `@(AdditionalFiles)` e a compilação, não schema).
+  `Warning`, regra ignorada; emitido pelo parser), **`ARCH9009`** (baseline inválido, `Warning`; o
+  `BaselineSuppressor` então não suprime nada; emitido pelo analyzer, ancorado em
+  `arch-rules.baseline.yaml` com linha/coluna do `BaselineFile.Parse`). `ARCH9006`/`ARCH9007`/`ARCH9005`/
+  `ARCH9009` são reportados só pelo analyzer (descrevem a resolução contra `@(AdditionalFiles)` e a compilação, não schema).
   Um código de motor desconhecido para o analyzer cai em `ARCH9001`/`ARCH9002`
   (`ArchDiagnostics.GetEngineDescriptorOrFallback`).
+- **Baseline de violações (issue #25).** Todo diagnóstico de slot traz em `Diagnostic.Properties`
+  `archRuleId` e **`archSubject`** (assunto estável, sem linha; formato único em
+  `ArchDiagnosticProperties`: `<origem> -> <alvo>.<membro>` em `forbidden-call`/`must-route-through`,
+  só o tipo alvo na criação de objeto, `<tipo>` em `naming-convention`/`max-dependencies`; nomes
+  qualificados da definição original). O Roslyn grava as Properties no SARIF em
+  `properties.customProperties`. `arch-rules baseline` lê o SARIF e escreve `arch-rules.baseline.yaml`
+  (`schema: arch-rules-baseline/v1`, `entries: [{ rule, file, subject }]`, `file` relativo ao diretório
+  do arquivo, com `/`) no ancestral mais próximo com `arch-rules.yaml`. O `BaselineSuppressor`
+  (`DiagnosticSuppressor`, uma `SuppressionDescriptor` `ARCHB0001..ARCHB0512` por slot) lê o
+  AdditionalFile de nome exato `arch-rules.baseline.yaml` (sem I/O, cache por `SourceText`) e suprime
+  quando regra + caminho (sem caixa, `\`→`/`) + assunto casam — todas as ocorrências, sem contagem;
+  vale também para slots com severidade `error`. O analyzer **não** trata o baseline como config nem
+  `extends` (só procura `arch-rules.yaml`). Limite: `--check`/`--update` só veem diretórios presentes no
+  SARIF; testes de suppressor precisam de `reportSuppressedDiagnostics: true` para enxergar o que foi
+  suprimido.
 - **Convenção de nome `arch-rules.*.yaml` para `extends`.** Só arquivos nesse padrão (ao lado do
   `.csproj`, exceto `arch-rules.yaml` e o `arch-rules.lock.yaml` gerado pelo CLI) entram
   automaticamente em `@(AdditionalFiles)` via `build/RuleKit.Analyzer.targets`. Fora da convenção, o

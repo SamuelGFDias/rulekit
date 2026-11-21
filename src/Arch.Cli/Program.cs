@@ -58,6 +58,8 @@ namespace Arch.Cli
                     return RunGen(args, output, error);
                 case "validate":
                     return RunValidate(args, output, error);
+                case "baseline":
+                    return RunBaseline(args, output, error);
                 case "-h":
                 case "--help":
                     PrintUsage(output);
@@ -152,17 +154,72 @@ namespace Arch.Cli
             return ValidateCommand.Run(yamlPath, output, strict);
         }
 
+        private static int RunBaseline(string[] args, TextWriter output, TextWriter error)
+        {
+            const string usage = "Uso: arch-rules baseline <sarif>... [--update | --check] [--strict]";
+            var sarifPaths = new System.Collections.Generic.List<string>();
+            var mode = BaselineMode.Regenerate;
+            var modeSet = false;
+            var strict = false;
+
+            for (var i = 1; i < args.Length; i++)
+            {
+                if (args[i] == StrictOption)
+                {
+                    strict = true;
+                }
+                else if (args[i] == "--update" || args[i] == "--check")
+                {
+                    if (modeSet)
+                    {
+                        error.WriteLine("--update e --check são mutuamente exclusivos.");
+                        error.WriteLine(usage);
+                        return 1;
+                    }
+
+                    modeSet = true;
+                    mode = args[i] == "--update" ? BaselineMode.Update : BaselineMode.Check;
+                }
+                else if (args[i].StartsWith("--", StringComparison.Ordinal))
+                {
+                    error.WriteLine($"Opção desconhecida: '{args[i]}'.");
+                    error.WriteLine(usage);
+                    return 1;
+                }
+                else
+                {
+                    sarifPaths.Add(args[i]);
+                }
+            }
+
+            if (sarifPaths.Count == 0)
+            {
+                error.WriteLine(usage);
+                return 1;
+            }
+
+            return BaselineCommand.Run(sarifPaths, mode, output, strict);
+        }
+
         private static void PrintUsage(TextWriter writer)
         {
             writer.WriteLine("Uso:");
             writer.WriteLine("  arch-rules gen <caminho-do-yaml> [--out <diretorio>] [--strict]");
             writer.WriteLine("  arch-rules validate <caminho-do-yaml> [--strict]");
+            writer.WriteLine("  arch-rules baseline <sarif>... [--update | --check] [--strict]");
             writer.WriteLine();
             writer.WriteLine("Opções:");
             writer.WriteLine("  --out <diretorio>  (gen) diretório de saída; padrão: ao lado do YAML.");
             writer.WriteLine("  --strict           QUALQUER aviso vira erro: saída 1 (ARCH9003, ARCH9008; em 'validate'");
             writer.WriteLine("                     também o ARCH9005 de lock divergente — 'gen' não compara com o lock).");
             writer.WriteLine("                     Em 'gen', nada é gerado quando o --strict falha.");
+            writer.WriteLine("  baseline           lê o(s) SARIF do build (dotnet build -p:ErrorLog=build.sarif,version=2.1) e");
+            writer.WriteLine("                     escreve arch-rules.baseline.yaml no diretório do arch-rules.yaml mais próximo de");
+            writer.WriteLine("                     cada violação. Sem flag: regenera com todas as violações do SARIF.");
+            writer.WriteLine("    --update         ratchet: remove as entradas que não aparecem mais; nunca acrescenta.");
+            writer.WriteLine("    --check          não escreve; sai 1 se algum baseline existente tem entrada obsoleta (CI).");
+            writer.WriteLine("                     Em 'baseline', --strict faz aviso (arquivo sem arch-rules.yaml, resultado sem");
+            writer.WriteLine("                     archRuleId/archSubject) sair 1 sem escrever nada.");
             writer.WriteLine();
             writer.WriteLine("Códigos de saída:");
             writer.WriteLine("  0  válido (avisos ARCH9003 não bloqueiam; ARCH9008 também não em 'gen').");
