@@ -225,7 +225,10 @@ namespace Sample
             _memberSimpleNames = new HashSet<string>(memberSimpleNames ?? Array.Empty<string>(), StringComparer.Ordinal);
         }
 
-        public IReadOnlyCollection<string> GetLayers(INamedTypeSymbol symbol)
+        public IReadOnlyDictionary<string, string> GetCaptures(INamedTypeSymbol symbol, string layerName)
+                => new Dictionary<string, string>();
+
+            public IReadOnlyCollection<string> GetLayers(INamedTypeSymbol symbol)
             => _memberSimpleNames.Contains(symbol.Name)
                 ? new[] { _layerName }
                 : Array.Empty<string>();

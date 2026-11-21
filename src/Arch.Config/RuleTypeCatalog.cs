@@ -26,6 +26,7 @@ namespace Arch.Config
         public const string Require = "require";
         public const string Max = "max";
         public const string CountBy = "countBy";
+        public const string When = "when";
     }
 
     /// <summary>Valores aceitos em <c>require</c> (naming-convention) e <c>countBy</c> (max-dependencies).</summary>
@@ -37,6 +38,10 @@ namespace Arch.Config
         public const string CountByConstructorParameters = "constructor-parameters";
         public const string CountByFields = "fields";
         public const string CountByAll = "all";
+
+        /// <summary>Chaves aceitas em <c>when</c> (forbidden-call, must-route-through).</summary>
+        public const string WhenSame = "same";
+        public const string WhenDiffer = "differ";
     }
 
     /// <summary>Forma do valor de um campo de regra no YAML.</summary>
@@ -55,6 +60,12 @@ namespace Arch.Config
         /// <summary>Mapeamento com exatamente um par chave → escalar (ex.: <c>require: { suffix: Repository }</c>).
         /// A forma legada escalar <c>chave=valor</c> também é aceita.</summary>
         KeyValue,
+
+        /// <summary>Mapeamento com exatamente uma chave → lista de escalares não vazios (ex.:
+        /// <c>when: { differ: [Module, Tenant] }</c>); um escalar solto como valor é uma lista de um item.
+        /// A forma legada escalar <c>chave=A,B</c> também é aceita. Em <see cref="RulePropertyValue"/>:
+        /// <c>Key</c> + <c>Items</c>; em <c>Extra</c>: <c>"chave=A,B"</c>.</summary>
+        KeyList,
     }
 
     /// <summary>Declaração de um campo específico de um tipo de regra.</summary>
@@ -68,7 +79,8 @@ namespace Arch.Config
 
         /// <summary>
         /// Valores aceitos (comparação ordinal), ou vazio quando qualquer valor da forma
-        /// <see cref="Kind"/> serve. Para <see cref="RuleFieldKind.KeyValue"/>, restringe a CHAVE.
+        /// <see cref="Kind"/> serve. Para <see cref="RuleFieldKind.KeyValue"/> e
+        /// <see cref="RuleFieldKind.KeyList"/>, restringe a CHAVE.
         /// </summary>
         public IReadOnlyList<string> AllowedValues { get; }
 
@@ -139,13 +151,16 @@ namespace Arch.Config
             new RuleTypeSchema(
                 RuleTypeNames.ForbiddenCall,
                 new RuleFieldSchema(RuleFieldNames.From, RuleFieldKind.Scalar, required: true),
-                new RuleFieldSchema(RuleFieldNames.To, RuleFieldKind.Scalar, required: true)),
+                new RuleFieldSchema(RuleFieldNames.To, RuleFieldKind.Scalar, required: true),
+                // Condição sobre as capturas [Nome] das camadas from/to (issue #24).
+                new RuleFieldSchema(RuleFieldNames.When, RuleFieldKind.KeyList, required: false, RuleFieldValues.WhenSame, RuleFieldValues.WhenDiffer)),
             new RuleTypeSchema(
                 RuleTypeNames.MustRouteThrough,
                 new RuleFieldSchema(RuleFieldNames.From, RuleFieldKind.Scalar, required: true),
                 new RuleFieldSchema(RuleFieldNames.To, RuleFieldKind.Scalar, required: true),
                 // Só alimenta a mensagem ({through}); o avaliador detecta sem ele.
-                new RuleFieldSchema(RuleFieldNames.Through, RuleFieldKind.List, required: false)),
+                new RuleFieldSchema(RuleFieldNames.Through, RuleFieldKind.List, required: false),
+                new RuleFieldSchema(RuleFieldNames.When, RuleFieldKind.KeyList, required: false, RuleFieldValues.WhenSame, RuleFieldValues.WhenDiffer)),
             new RuleTypeSchema(
                 RuleTypeNames.NamingConvention,
                 new RuleFieldSchema(RuleFieldNames.Layer, RuleFieldKind.Scalar, required: true),

@@ -77,6 +77,23 @@ public class OrderController
         /// (que só registra ações sobre a camada `to`), mas este teste prova explicitamente que o
         /// comportamento central da regra — "pode chamar o intermediário" — se sustenta.
         /// </summary>
+        /// <summary>
+        /// `when` é herdado de `forbidden-call` (issue #24): com a condição declarada e o resolvedor de
+        /// teste sem nenhuma captura, o par violador deixa de ser reportado (lado sem a captura).
+        /// </summary>
+        [Fact]
+        public async Task When_com_lado_sem_a_captura_nao_reporta()
+        {
+            const string source = @"
+public class OrderRepository { public void Load() { } }
+public class OrderController
+{
+    public void Get(OrderRepository repo) { repo.Load(); }
+}
+";
+            await VerifyAsync(source, Rule(ControllerLayer, RepositoryLayer, ServiceLayer, when: "differ=Module"));
+        }
+
         [Fact]
         public async Task Controller_chamando_Service_o_intermediario_nao_reporta()
         {
@@ -109,9 +126,14 @@ public class OrderController
                 .WithArguments(message);
         }
 
-        private static RuleDefinition Rule(string fromLayer, string toLayer, string through)
+        private static RuleDefinition Rule(string fromLayer, string toLayer, string through, string when = null)
         {
             var extra = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (when != null)
+            {
+                extra["when"] = when;
+            }
+
             if (fromLayer != null)
             {
                 extra["from"] = fromLayer;
@@ -261,6 +283,9 @@ public class OrderController
             {
                 _config = config;
             }
+
+            public IReadOnlyDictionary<string, string> GetCaptures(INamedTypeSymbol symbol, string layerName)
+                => new Dictionary<string, string>();
 
             public IReadOnlyCollection<string> GetLayers(INamedTypeSymbol symbol)
             {

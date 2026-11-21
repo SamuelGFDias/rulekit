@@ -207,6 +207,14 @@ fixa contratos compartilhados (interfaces, trechos do ADR) no prompt de cada del
   `Properties` escalares). `RuleDefinition.FromProperties` é a fábrica que o parser usa.
   `SourceLine`/`SourceColumn`/`SourceDocumentIndex` ancoram diagnósticos no arquivo da cadeia que
   declarou a regra.
+- **Capturas `[Nome]` e `when` (issue #24).** `SegmentPattern` (`Arch.Config`, público) é a única sintaxe de
+  padrão de `namespace`/`assembly` (literal, `*`, `**`, `[Nome]`; malformado/repetido → `ARCH9001`).
+  `ILayerResolver.GetCaptures(symbol, layer)` devolve nome → segmento capturado (vazio, nunca null, sem
+  captura/fora da camada); vale o primeiro critério de `match` **com placeholder**, na ordem declarada
+  (`exclude` não captura), memoizado junto com `GetLayers`. `when: { same|differ: [Nome] }`
+  (`RuleFieldKind.KeyList`, `Extra` `"differ=A,B"`) é aplicado em `ForbiddenCallEvaluator` (herdado por
+  `must-route-through`); lado sem a captura → não reporta. `RuleConditionValidator` valida os nomes de
+  `when` **após o merge de `extends`** (`ARCH9008` se nenhuma das camadas `from`/`to` captura o nome).
 - **`SlotPool`** (`src/Arch.Config/SlotPool.cs`) — tamanho do pool (512), formato `ARCH` + 4 dígitos ASCII
   e normalização (trim, sem diferenciar caixa) numa só fonte, usada pelo parser, por
   `ArchDiagnostics.TryGetSlot` (analyzer) e por `SlotValidator` (CLI) — os três dão o mesmo veredito.

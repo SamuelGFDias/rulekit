@@ -63,11 +63,44 @@ namespace Arch.Config
         public IReadOnlyList<LayerMatchCriterion> Match { get; }
         public IReadOnlyList<LayerMatchCriterion> Exclude { get; }
 
+        /// <summary>
+        /// Nomes capturados por placeholders <c>[Nome]</c> nos critérios <c>namespace</c>/<c>assembly</c>
+        /// de <see cref="Match"/> (distintos, na ordem de declaração). <c>exclude</c> não captura e não
+        /// entra aqui.
+        /// </summary>
+        public IReadOnlyList<string> CaptureNames { get; }
+
         public LayerDefinition(string name, IReadOnlyList<LayerMatchCriterion> match, IReadOnlyList<LayerMatchCriterion> exclude)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));
             Match = match ?? Array.Empty<LayerMatchCriterion>();
             Exclude = exclude ?? Array.Empty<LayerMatchCriterion>();
+            CaptureNames = CollectCaptureNames(Match);
+        }
+
+        private static IReadOnlyList<string> CollectCaptureNames(IReadOnlyList<LayerMatchCriterion> match)
+        {
+            var names = new List<string>();
+            foreach (var criterion in match)
+            {
+                if (criterion == null)
+                {
+                    continue;
+                }
+
+                foreach (var pattern in new[] { criterion.Namespace, criterion.Assembly })
+                {
+                    foreach (var name in SegmentPattern.GetCaptureNames(pattern))
+                    {
+                        if (!names.Contains(name))
+                        {
+                            names.Add(name);
+                        }
+                    }
+                }
+            }
+
+            return names.Count == 0 ? (IReadOnlyList<string>)Array.Empty<string>() : names.ToArray();
         }
     }
 
@@ -273,6 +306,47 @@ namespace Arch.Config
             }
 
             return property.Kind == RuleFieldKind.Scalar && TryParseKeyValue(property.Scalar, out key, out value);
+        }
+
+        /// <summary>
+        /// Par chave → lista do campo (<see cref="RuleFieldKind.KeyList"/>, ex.: <c>when: { differ: [Module] }</c>);
+        /// um escalar é aceito na forma de <see cref="Extra"/> (<c>chave=A,B</c>, itens aparados, vazios
+        /// descartados). Falha se a lista ficar vazia.
+        /// </summary>
+        public bool TryGetKeyList(string name, out string key, out IReadOnlyList<string> items)
+        {
+            key = null;
+            items = Array.Empty<string>();
+            if (name == null || !Properties.TryGetValue(name, out var property))
+            {
+                return false;
+            }
+
+            if (property.Kind == RuleFieldKind.KeyList)
+            {
+                key = property.Key;
+                items = property.Items;
+                return items.Count > 0;
+            }
+
+            if (property.Kind != RuleFieldKind.Scalar || !TryParseKeyValue(property.Scalar, out var parsedKey, out var parsedValue))
+            {
+                return false;
+            }
+
+            var parsed = parsedValue
+                .Split(',')
+                .Select(item => item.Trim())
+                .Where(item => item.Length > 0)
+                .ToArray();
+            if (parsed.Length == 0)
+            {
+                return false;
+            }
+
+            key = parsedKey;
+            items = parsed;
+            return true;
         }
 
         internal static bool TryParseKeyValue(string raw, out string key, out string value)

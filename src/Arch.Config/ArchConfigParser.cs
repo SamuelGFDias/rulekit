@@ -161,6 +161,9 @@ namespace Arch.Config
                 return new ArchConfigParseResult(null, merged.Errors);
             }
 
+            // Depois do merge: com `extends`, as camadas finais de from/to só existem aqui.
+            RuleConditionValidator.Apply(merged);
+
             var config = new ArchConfig(
                 merged.Schema,
                 merged.Layers,

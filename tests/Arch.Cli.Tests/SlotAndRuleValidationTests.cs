@@ -138,6 +138,52 @@ rules:
             Assert.Contains("countBy", text);
         }
 
+        private const string ModuleYaml = @"
+schema: arch-rules/v1
+severities:
+  media: warning
+defaults:
+  severity: media
+layers:
+  Services:
+    match: [ { namespace: ""Acme.[Module].Services.**"" } ]
+  Domain:
+    match: [ { namespace: ""Acme.[Module].Domain.**"" } ]
+rules:
+  - id: ACME-010
+    slot: ARCH0010
+    type: forbidden-call
+    from: Services
+    to: Domain
+    when: { differ: [WHEN_NAME] }
+";
+
+        [Fact]
+        public void Issue24_Validate_AcceptsWhenNamingAPlaceholder()
+        {
+            var yamlPath = Path.Combine(_dir, "arch-rules.yaml");
+            File.WriteAllText(yamlPath, ModuleYaml.Replace("WHEN_NAME", "Module"));
+
+            var exitCode = ValidateCommand.Run(yamlPath, new StringWriter());
+
+            Assert.Equal(0, exitCode);
+        }
+
+        [Fact]
+        public void Issue24_Validate_ReportsArch9008_ForWhenNamingAnUncapturedPlaceholder()
+        {
+            var yamlPath = Path.Combine(_dir, "arch-rules.yaml");
+            File.WriteAllText(yamlPath, ModuleYaml.Replace("WHEN_NAME", "Tenant"));
+            var output = new StringWriter();
+
+            var exitCode = ValidateCommand.Run(yamlPath, output);
+
+            var text = output.ToString();
+            Assert.Equal(1, exitCode);
+            Assert.Contains("[ARCH9008]", text);
+            Assert.Contains("Tenant", text);
+        }
+
         // ---- Revisão M2: regra `enabled: false` não entra na validação de slot (paridade com o analyzer) ----
 
         private const string DisabledRuleHeader = @"
