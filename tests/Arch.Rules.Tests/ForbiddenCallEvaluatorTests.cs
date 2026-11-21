@@ -383,9 +383,86 @@ public class OrderController
                 .WithArguments(message);
         }
 
-        private static RuleDefinition Rule(string fromLayer, string toLayer, string messageTemplate = null)
+        // ---- when (issue #24): captura "Module" = namespace do tipo no resolvedor de teste ----------
+
+        private const string TwoModulesSource = @"
+namespace Vendas
+{
+    public class PedidoRepository { public void Load() { } }
+    public class PedidoController
+    {
+        public void Same(PedidoRepository repo) { {|#0:repo.Load()|}; }
+        public void Other(Estoque.ItemRepository repo) { {|#1:repo.Load()|}; }
+    }
+}
+
+namespace Estoque
+{
+    public class ItemRepository { public void Load() { } }
+}
+";
+
+        [Fact]
+        public async Task When_differ_so_reporta_o_par_de_modulos_diferentes()
+        {
+            await VerifyAsync(
+                TwoModulesSource,
+                Rule(ControllerLayer, RepositoryLayer, when: "differ=Module"),
+                Expect(1, Message(ControllerLayer, RepositoryLayer, "ItemRepository.Load")));
+        }
+
+        [Fact]
+        public async Task When_same_so_reporta_o_par_do_mesmo_modulo()
+        {
+            await VerifyAsync(
+                TwoModulesSource,
+                Rule(ControllerLayer, RepositoryLayer, when: "same=Module"),
+                Expect(0, Message(ControllerLayer, RepositoryLayer, "PedidoRepository.Load")));
+        }
+
+        [Fact]
+        public async Task Sem_when_reporta_os_dois_pares()
+        {
+            await VerifyAsync(
+                TwoModulesSource,
+                Rule(ControllerLayer, RepositoryLayer),
+                Expect(0, Message(ControllerLayer, RepositoryLayer, "PedidoRepository.Load")),
+                Expect(1, Message(ControllerLayer, RepositoryLayer, "ItemRepository.Load")));
+        }
+
+        [Theory]
+        [InlineData("same=Module")]
+        [InlineData("differ=Module")]
+        public async Task When_com_lado_sem_a_captura_nao_reporta(string when)
+        {
+            // Origem no namespace global: o resolvedor de teste não captura Module desse lado.
+            const string source = @"
+namespace Estoque { public class ItemRepository { public void Load() { } } }
+public class GlobalController
+{
+    public void Run(Estoque.ItemRepository repo) { repo.Load(); }
+}
+";
+            await VerifyAsync(source, Rule(ControllerLayer, RepositoryLayer, when: when));
+        }
+
+        [Fact]
+        public async Task When_com_varios_nomes_differ_exige_todos_presentes_e_ao_menos_um_diferente()
+        {
+            // "Tenant" não é capturado por ninguém: nem todos os nomes existem nos dois lados.
+            await VerifyAsync(
+                TwoModulesSource,
+                Rule(ControllerLayer, RepositoryLayer, when: "differ=Module,Tenant"));
+        }
+
+        private static RuleDefinition Rule(string fromLayer, string toLayer, string messageTemplate = null, string when = null)
         {
             var extra = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (when != null)
+            {
+                extra["when"] = when;
+            }
+
             if (fromLayer != null)
             {
                 extra["from"] = fromLayer;
@@ -555,6 +632,19 @@ public class OrderController
             internal SuffixLayerResolver(ArchConfig config)
             {
                 _config = config;
+            }
+
+            /// <summary>Captura <c>Module</c> = nome do namespace que contém o tipo (nada no namespace global).</summary>
+            public IReadOnlyDictionary<string, string> GetCaptures(INamedTypeSymbol symbol, string layerName)
+            {
+                var captures = new Dictionary<string, string>(StringComparer.Ordinal);
+                var ns = symbol?.ContainingNamespace;
+                if (ns != null && !ns.IsGlobalNamespace && IsInLayer(symbol, layerName))
+                {
+                    captures["Module"] = ns.Name;
+                }
+
+                return captures;
             }
 
             public IReadOnlyCollection<string> GetLayers(INamedTypeSymbol symbol)

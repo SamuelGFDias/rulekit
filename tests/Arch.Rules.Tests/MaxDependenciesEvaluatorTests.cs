@@ -64,6 +64,9 @@ namespace Arch.Rules.Tests
                 _typeNamesInServiceLayer = new HashSet<string>(typeNamesInServiceLayer, StringComparer.Ordinal);
             }
 
+            public IReadOnlyDictionary<string, string> GetCaptures(INamedTypeSymbol symbol, string layerName)
+                => new Dictionary<string, string>();
+
             public IReadOnlyCollection<string> GetLayers(INamedTypeSymbol symbol)
                 => IsInLayer(symbol, ServiceLayer) ? new[] { ServiceLayer } : Array.Empty<string>();
 

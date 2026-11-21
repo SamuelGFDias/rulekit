@@ -366,6 +366,19 @@ namespace Arch.Config.Internal
                     }
 
                     var value = (kv.Value as YamlScalarNode)?.Value;
+
+                    // Placeholders `[Nome]` só existem em namespace/assembly: malformado ou repetido é
+                    // erro de schema bloqueante, ancorado no valor (issue #24).
+                    if ((key == "namespace" || key == "assembly")
+                        && !SegmentPattern.TryParse(value, out _, out var patternProblem))
+                    {
+                        Blocking(
+                            result,
+                            $"Critério '{key}' de '{fieldName}' da camada '{layerName}': {patternProblem}.",
+                            kv.Value.Start);
+                        return false;
+                    }
+
                     filled++;
                     switch (key)
                     {
@@ -739,6 +752,68 @@ namespace Arch.Config.Internal
                     }
 
                     value = RulePropertyValue.FromKeyValue(key, val);
+                    return true;
+                }
+
+                case RuleFieldKind.KeyList:
+                {
+                    const string shape = "deve ser um mapeamento com exatamente uma chave cujo valor é uma lista de nomes (ex.: { differ: [Module] })";
+                    string key = null;
+                    var items = new List<string>();
+
+                    if (node is YamlMappingNode map)
+                    {
+                        if (map.Children.Count != 1
+                            || !(map.Children.First().Key is YamlScalarNode keyNode)
+                            || string.IsNullOrWhiteSpace(keyNode.Value))
+                        {
+                            problem = shape;
+                            return false;
+                        }
+
+                        key = keyNode.Value.Trim();
+                        var valueNode = map.Children.First().Value;
+                        if (valueNode is YamlScalarNode single)
+                        {
+                            items.Add(single.Value?.Trim());
+                        }
+                        else if (valueNode is YamlSequenceNode seq)
+                        {
+                            foreach (var item in seq.Children)
+                            {
+                                items.Add((item as YamlScalarNode)?.Value?.Trim());
+                            }
+                        }
+                        else
+                        {
+                            problem = shape;
+                            return false;
+                        }
+                    }
+                    else if (node is YamlScalarNode legacy && RuleDefinition.TryParseKeyValue(legacy.Value, out var legacyKey, out var legacyValue))
+                    {
+                        key = legacyKey;
+                        items.AddRange(legacyValue.Split(',').Select(i => i.Trim()));
+                    }
+                    else
+                    {
+                        problem = shape;
+                        return false;
+                    }
+
+                    if (items.Count == 0 || items.Any(string.IsNullOrEmpty))
+                    {
+                        problem = "deve ter uma lista não vazia de nomes não vazios";
+                        return false;
+                    }
+
+                    if (!field.IsAllowedValue(key))
+                    {
+                        problem = $"tem chave '{key}' inválida (aceitas: {string.Join(", ", field.AllowedValues)})";
+                        return false;
+                    }
+
+                    value = RulePropertyValue.FromKeyList(key, items);
                     return true;
                 }
 

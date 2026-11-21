@@ -20,13 +20,13 @@ namespace Arch.Config
         /// <summary>Texto do escalar (<see cref="RuleFieldKind.Scalar"/>); null nas demais formas.</summary>
         public string Scalar { get; }
 
-        /// <summary>Itens (<see cref="RuleFieldKind.List"/>); vazio nas demais formas.</summary>
+        /// <summary>Itens (<see cref="RuleFieldKind.List"/> e <see cref="RuleFieldKind.KeyList"/>); vazio nas demais formas.</summary>
         public IReadOnlyList<string> Items { get; }
 
         /// <summary>Valor inteiro (<see cref="RuleFieldKind.Integer"/>); 0 nas demais formas.</summary>
         public int Integer { get; }
 
-        /// <summary>Chave do par (<see cref="RuleFieldKind.KeyValue"/>); null nas demais formas.</summary>
+        /// <summary>Chave do par (<see cref="RuleFieldKind.KeyValue"/> e <see cref="RuleFieldKind.KeyList"/>); null nas demais formas.</summary>
         public string Key { get; }
 
         /// <summary>Valor do par (<see cref="RuleFieldKind.KeyValue"/>); null nas demais formas.</summary>
@@ -66,10 +66,21 @@ namespace Arch.Config
                 key ?? throw new ArgumentNullException(nameof(key)),
                 value ?? throw new ArgumentNullException(nameof(value)));
 
+        /// <summary>Par chave → lista (<see cref="RuleFieldKind.KeyList"/>), ex.: <c>differ</c> → <c>[Module, Tenant]</c>.</summary>
+        public static RulePropertyValue FromKeyList(string key, IEnumerable<string> items)
+            => new RulePropertyValue(
+                RuleFieldKind.KeyList,
+                null,
+                Array.AsReadOnly((items ?? Enumerable.Empty<string>()).Select(i => i ?? string.Empty).ToArray()),
+                0,
+                key ?? throw new ArgumentNullException(nameof(key)),
+                null);
+
         /// <summary>
         /// Serialização texto usada em <see cref="RuleDefinition.Extra"/> (contrato de AGENTS.md §8):
         /// escalar como está; lista com <c>string.Join(",", ...)</c> sem espaço; inteiro em cultura
-        /// invariante; par como <c>chave=valor</c>.
+        /// invariante; par como <c>chave=valor</c>; par chave → lista como <c>chave=A,B</c>
+        /// (ex.: <c>differ=Module,Tenant</c>).
         /// </summary>
         public string ToExtraString()
         {
@@ -81,6 +92,8 @@ namespace Arch.Config
                     return Integer.ToString(CultureInfo.InvariantCulture);
                 case RuleFieldKind.KeyValue:
                     return Key + "=" + Value;
+                case RuleFieldKind.KeyList:
+                    return Key + "=" + string.Join(",", Items);
                 default:
                     return Scalar ?? string.Empty;
             }

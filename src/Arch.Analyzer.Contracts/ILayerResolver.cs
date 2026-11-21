@@ -6,7 +6,7 @@ namespace Arch.Analyzer.Contracts
     /// <summary>
     /// Classifica um <see cref="INamedTypeSymbol"/> nas camadas declaradas em `layers:` do
     /// arch-rules.yaml (ADR-001 D2), aplicando os critérios OR-combinados
-    /// (namespace/nameSuffix/baseType/implements/attribute) e respeitando `exclude`.
+    /// (namespace/nameSuffix/baseType/implements/attribute/assembly) e respeitando `exclude`.
     ///
     /// Contrato congelado na Fase 0 (spike de viabilidade) para permitir que a Fase 1B
     /// (analyzer-core) e a Fase 2 (avaliadores de regra) sejam paralelizadas contra uma
@@ -33,5 +33,14 @@ namespace Arch.Analyzer.Contracts
         /// coleção completa de <see cref="GetLayers"/>.
         /// </summary>
         bool IsInLayer(INamedTypeSymbol symbol, string layerName);
+
+        /// <summary>
+        /// Valores capturados pelos placeholders <c>[Nome]</c> dos critérios <c>namespace</c>/<c>assembly</c>
+        /// de <c>match</c> da camada <paramref name="layerName"/> para <paramref name="symbol"/> (nome →
+        /// valor do segmento). Vale a captura do PRIMEIRO critério com placeholder, na ordem declarada, que
+        /// casar; <c>exclude</c> não captura. Dicionário vazio (nunca null) quando o critério que casou não
+        /// tem placeholder, o tipo não está na camada ou a camada não existe.
+        /// </summary>
+        IReadOnlyDictionary<string, string> GetCaptures(INamedTypeSymbol symbol, string layerName);
     }
 }

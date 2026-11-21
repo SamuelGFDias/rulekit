@@ -47,6 +47,9 @@ namespace Arch.Rules
         /// <inheritdoc cref="FromKey"/>
         public const string ToKey = RuleFieldNames.To;
 
+        /// <summary>Campo opcional <c>when</c> (issue #24): condição sobre as capturas <c>[Nome]</c> das camadas.</summary>
+        public const string WhenKey = RuleFieldNames.When;
+
         // Chaves de Diagnostic.Properties. ADR-001 §3 (Opção C) exige que o ID de negócio da
         // organização chegue ao consumidor pela mensagem E por Properties — Properties é o canal
         // legível por máquina (Code Fix da Fase 3+, relatórios de CI), a mensagem é o canal humano.
@@ -97,6 +100,15 @@ namespace Arch.Rules
                 return;
             }
 
+            // `when` presente mas ilegível (regra montada à mão, o parser já garante a forma): sem
+            // semântica definida, e reportar sem a condição seria uma avalanche de falsos positivos —
+            // mesmo critério do `from`/`to` ausente acima: não registrar nada.
+            WhenCondition condition;
+            if (!WhenCondition.TryCreate(rule, out condition))
+            {
+                return;
+            }
+
             // Tudo que não depende da operação é resolvido UMA vez por regra por compilação, não por
             // operação analisada: template escolhido e Properties já imutáveis.
             var template = string.IsNullOrWhiteSpace(rule.MessageTemplate)
@@ -107,7 +119,7 @@ namespace Arch.Rules
 
             context.RegisterOperationAction(
                 operationContext => Analyze(
-                    operationContext, rule, layerResolver, slotDescriptor, fromLayer, toLayer, template, properties),
+                    operationContext, rule, layerResolver, slotDescriptor, fromLayer, toLayer, template, properties, condition),
                 OperationKind.Invocation,
                 OperationKind.ObjectCreation,
                 OperationKind.PropertyReference,
@@ -122,7 +134,8 @@ namespace Arch.Rules
             string fromLayer,
             string toLayer,
             string template,
-            ImmutableDictionary<string, string> properties)
+            ImmutableDictionary<string, string> properties,
+            WhenCondition condition)
         {
             var operation = operationContext.Operation;
 
@@ -157,6 +170,14 @@ namespace Arch.Rules
             }
 
             if (!layerResolver.IsInLayer(sourceType, fromLayer))
+            {
+                return;
+            }
+
+            // Condição `when` (issue #24) no ponto em que o par (tipo de origem, tipo alvo) está decidido
+            // e prestes a ser reportado: lookups em dicionários memoizados, bem mais barato que o teste
+            // de `nameof` abaixo, e só roda para regras que declaram `when`.
+            if (condition != null && !condition.Allows(layerResolver, sourceType, fromLayer, targetType, toLayer))
             {
                 return;
             }
@@ -435,6 +456,96 @@ namespace Arch.Rules
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// `when: { same | differ: [Nome, ...] }`. <c>same</c> → reporta só se todos os nomes existem
+        /// nos dois lados e são iguais; <c>differ</c> → só se todos existem nos dois lados e ao menos um
+        /// difere. Lado sem a captura: o par não é reportado (nenhuma das duas formas se aplica).
+        /// </summary>
+        private sealed class WhenCondition
+        {
+            private readonly bool _requireSame;
+            private readonly string[] _names;
+
+            private WhenCondition(bool requireSame, string[] names)
+            {
+                _requireSame = requireSame;
+                _names = names;
+            }
+
+            /// <summary>true sem condição (<paramref name="condition"/> null) ou com condição válida.</summary>
+            internal static bool TryCreate(RuleDefinition rule, out WhenCondition condition)
+            {
+                condition = null;
+                if (!rule.Properties.ContainsKey(WhenKey))
+                {
+                    return true;
+                }
+
+                string key;
+                IReadOnlyList<string> names;
+                if (!rule.TryGetKeyList(WhenKey, out key, out names))
+                {
+                    return false;
+                }
+
+                if (string.Equals(key, RuleFieldValues.WhenSame, StringComparison.Ordinal))
+                {
+                    condition = new WhenCondition(true, ToArray(names));
+                    return true;
+                }
+
+                if (string.Equals(key, RuleFieldValues.WhenDiffer, StringComparison.Ordinal))
+                {
+                    condition = new WhenCondition(false, ToArray(names));
+                    return true;
+                }
+
+                return false;
+            }
+
+            internal bool Allows(
+                ILayerResolver layerResolver,
+                INamedTypeSymbol sourceType,
+                string fromLayer,
+                INamedTypeSymbol targetType,
+                string toLayer)
+            {
+                var fromCaptures = layerResolver.GetCaptures(sourceType, fromLayer);
+                var toCaptures = layerResolver.GetCaptures(targetType, toLayer);
+                var anyDiffers = false;
+
+                for (var i = 0; i < _names.Length; i++)
+                {
+                    string fromValue;
+                    string toValue;
+                    if (fromCaptures == null || toCaptures == null
+                        || !fromCaptures.TryGetValue(_names[i], out fromValue)
+                        || !toCaptures.TryGetValue(_names[i], out toValue))
+                    {
+                        return false;
+                    }
+
+                    if (!string.Equals(fromValue, toValue, StringComparison.Ordinal))
+                    {
+                        anyDiffers = true;
+                    }
+                }
+
+                return _requireSame ? !anyDiffers : anyDiffers;
+            }
+
+            private static string[] ToArray(IReadOnlyList<string> names)
+            {
+                var array = new string[names.Count];
+                for (var i = 0; i < array.Length; i++)
+                {
+                    array[i] = names[i];
+                }
+
+                return array;
+            }
         }
 
         private static bool TryGetLayerName(RuleDefinition rule, string key, out string layerName)

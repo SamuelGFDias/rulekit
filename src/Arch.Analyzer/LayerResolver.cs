@@ -35,6 +35,8 @@ namespace Arch.Analyzer
     {
         private static readonly string[] NoLayers = new string[0];
         private static readonly string[] NoNamespaceSegments = new string[0];
+        private static readonly IReadOnlyDictionary<string, string> NoCaptures =
+            new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(new Dictionary<string, string>());
 
         private readonly CompiledLayer[] _layers;
 
@@ -51,11 +53,11 @@ namespace Arch.Analyzer
         /// o bug clássico: dois <c>INamedTypeSymbol</c> do mesmo tipo vindos de compilações/threads
         /// diferentes não são a mesma instância, e o memo nunca acertaria.
         /// </summary>
-        private readonly ConcurrentDictionary<ISymbol, string[]> _memo =
-            new ConcurrentDictionary<ISymbol, string[]>(SymbolEqualityComparer.Default);
+        private readonly ConcurrentDictionary<ISymbol, Classification> _memo =
+            new ConcurrentDictionary<ISymbol, Classification>(SymbolEqualityComparer.Default);
 
         /// <summary>Delegate cacheado: evita alocar um closure novo a cada <see cref="GetOrAdd"/>.</summary>
-        private readonly Func<ISymbol, string[]> _classify;
+        private readonly Func<ISymbol, Classification> _classify;
 
         private LayerResolver(CompiledLayer[] layers)
         {
@@ -169,7 +171,23 @@ namespace Arch.Analyzer
             // normalizar antes do memo evita uma entrada por instanciação.
             var key = (ISymbol)(symbol.OriginalDefinition ?? symbol);
 
-            return _memo.GetOrAdd(key, _classify);
+            return _memo.GetOrAdd(key, _classify).Layers;
+        }
+
+        /// <inheritdoc />
+        public IReadOnlyDictionary<string, string> GetCaptures(INamedTypeSymbol symbol, string layerName)
+        {
+            if (symbol == null || string.IsNullOrEmpty(layerName) || _layers.Length == 0)
+            {
+                return NoCaptures;
+            }
+
+            var classification = _memo.GetOrAdd((ISymbol)(symbol.OriginalDefinition ?? symbol), _classify);
+
+            IReadOnlyDictionary<string, string> captures;
+            return classification.Captures != null && classification.Captures.TryGetValue(layerName, out captures)
+                ? captures
+                : NoCaptures;
         }
 
         /// <inheritdoc />
@@ -183,7 +201,7 @@ namespace Arch.Analyzer
             // Reaproveita o memo de GetLayers: a partir da segunda consulta do mesmo símbolo isto é
             // um lookup + varredura de um array de 1-2 posições, sem alocar (o array memoizado é
             // devolvido por referência, nunca copiado).
-            var layers = _memo.GetOrAdd((ISymbol)(symbol.OriginalDefinition ?? symbol), _classify);
+            var layers = _memo.GetOrAdd((ISymbol)(symbol.OriginalDefinition ?? symbol), _classify).Layers;
 
             for (var i = 0; i < layers.Length; i++)
             {
@@ -196,11 +214,27 @@ namespace Arch.Analyzer
             return false;
         }
 
-        private string[] Classify(INamedTypeSymbol symbol)
+        /// <summary>Resultado memoizado por símbolo: camadas e, por camada, as capturas (null se nenhuma).</summary>
+        private sealed class Classification
+        {
+            internal readonly string[] Layers;
+            internal readonly Dictionary<string, IReadOnlyDictionary<string, string>> Captures;
+
+            internal Classification(string[] layers, Dictionary<string, IReadOnlyDictionary<string, string>> captures)
+            {
+                Layers = layers;
+                Captures = captures;
+            }
+        }
+
+        private static readonly Classification NoClassification = new Classification(NoLayers, null);
+
+        private Classification Classify(INamedTypeSymbol symbol)
         {
             var namespaceSegments = GetNamespaceSegments(symbol);
             var assemblySegments = _usesAssembly ? GetAssemblySegments(symbol) : NoNamespaceSegments;
             List<string> matched = null;
+            Dictionary<string, IReadOnlyDictionary<string, string>> captures = null;
 
             for (var i = 0; i < _layers.Length; i++)
             {
@@ -219,9 +253,16 @@ namespace Arch.Analyzer
                 }
 
                 (matched ?? (matched = new List<string>(2))).Add(layer.Name);
+
+                IReadOnlyDictionary<string, string> layerCaptures;
+                if (layer.Match.TryCapture(namespaceSegments, assemblySegments, out layerCaptures))
+                {
+                    (captures ?? (captures = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal)))
+                        [layer.Name] = layerCaptures;
+                }
             }
 
-            return matched == null ? NoLayers : matched.ToArray();
+            return matched == null ? NoClassification : new Classification(matched.ToArray(), captures);
         }
 
         /// <summary>
@@ -288,23 +329,28 @@ namespace Arch.Analyzer
         private sealed class CompiledCriteria
         {
             private static readonly INamedTypeSymbol[] NoTypes = new INamedTypeSymbol[0];
+            private static readonly CapturingPattern[] NoCapturePatterns = new CapturingPattern[0];
 
             private readonly NamespaceTrie _namespaces;
             private readonly NamespaceTrie _assemblies;
+            private readonly CapturingPattern[] _captures; // namespace e assembly, na ordem declarada
             private readonly string[] _nameSuffixes;
             private readonly INamedTypeSymbol[] _baseTypes;
             private readonly INamedTypeSymbol[] _interfaces;
             private readonly INamedTypeSymbol[] _attributes;
             private readonly bool _isEmpty;
 
+            private readonly bool _usesAssemblyCapture;
+
             internal bool UsesAssembly
             {
-                get { return !_assemblies.IsEmpty; }
+                get { return !_assemblies.IsEmpty || _usesAssemblyCapture; }
             }
 
             private CompiledCriteria(
                 NamespaceTrie namespaces,
                 NamespaceTrie assemblies,
+                CapturingPattern[] captures,
                 string[] nameSuffixes,
                 INamedTypeSymbol[] baseTypes,
                 INamedTypeSymbol[] interfaces,
@@ -312,12 +358,22 @@ namespace Arch.Analyzer
             {
                 _namespaces = namespaces;
                 _assemblies = assemblies;
+                _captures = captures;
+                for (var i = 0; i < captures.Length; i++)
+                {
+                    if (captures[i].IsAssembly)
+                    {
+                        _usesAssemblyCapture = true;
+                    }
+                }
+
                 _nameSuffixes = nameSuffixes;
                 _baseTypes = baseTypes;
                 _interfaces = interfaces;
                 _attributes = attributes;
                 _isEmpty = namespaces.IsEmpty
                     && assemblies.IsEmpty
+                    && captures.Length == 0
                     && nameSuffixes.Length == 0
                     && baseTypes.Length == 0
                     && interfaces.Length == 0
@@ -330,6 +386,7 @@ namespace Arch.Analyzer
             {
                 var namespaces = new NamespaceTrie();
                 var assemblies = new NamespaceTrie();
+                List<CapturingPattern> captures = null;
                 List<string> suffixes = null;
                 List<INamedTypeSymbol> baseTypes = null;
                 List<INamedTypeSymbol> interfaces = null;
@@ -345,15 +402,9 @@ namespace Arch.Analyzer
                             continue;
                         }
 
-                        if (!string.IsNullOrWhiteSpace(criterion.Namespace))
-                        {
-                            namespaces.Add(criterion.Namespace.Trim());
-                        }
+                        AddPattern(criterion.Namespace, false, namespaces, ref captures);
 
-                        if (!string.IsNullOrWhiteSpace(criterion.Assembly))
-                        {
-                            assemblies.Add(criterion.Assembly.Trim());
-                        }
+                        AddPattern(criterion.Assembly, true, assemblies, ref captures);
 
                         if (!string.IsNullOrWhiteSpace(criterion.NameSuffix))
                         {
@@ -369,10 +420,58 @@ namespace Arch.Analyzer
                 return new CompiledCriteria(
                     namespaces,
                     assemblies,
+                    captures == null ? NoCapturePatterns : captures.ToArray(),
                     suffixes == null ? new string[0] : suffixes.ToArray(),
                     baseTypes == null ? NoTypes : baseTypes.ToArray(),
                     interfaces == null ? NoTypes : interfaces.ToArray(),
                     attributes == null ? NoTypes : attributes.ToArray());
+            }
+
+            /// <summary>
+            /// Padrão sem placeholder vai para o trie (caminho quente sem alocação); com placeholder,
+            /// para a lista de <see cref="CapturingPattern"/> NA ORDEM DECLARADA (é a ordem que decide
+            /// qual captura vale). Padrão inválido (config montada à mão) cai no trie, onde um segmento
+            /// com colchete é só um literal que não casa nada.
+            /// </summary>
+            private static void AddPattern(string pattern, bool isAssembly, NamespaceTrie trie, ref List<CapturingPattern> captures)
+            {
+                if (string.IsNullOrWhiteSpace(pattern))
+                {
+                    return;
+                }
+
+                var capturing = CapturingPattern.TryCreate(pattern, isAssembly);
+                if (capturing == null)
+                {
+                    trie.Add(pattern.Trim());
+                    return;
+                }
+
+                (captures ?? (captures = new List<CapturingPattern>(2))).Add(capturing);
+            }
+
+            /// <summary>
+            /// Capturas do primeiro critério com placeholder que casa, na ordem declarada (namespace e
+            /// assembly numa só sequência, na ordem do YAML). false quando nenhum casa — inclusive quando
+            /// o `match` foi satisfeito por um critério sem placeholder.
+            /// </summary>
+            internal bool TryCapture(
+                string[] namespaceSegments,
+                string[] assemblySegments,
+                out IReadOnlyDictionary<string, string> captures)
+            {
+                for (var i = 0; i < _captures.Length; i++)
+                {
+                    var pattern = _captures[i];
+                    captures = pattern.Capture(pattern.IsAssembly ? assemblySegments : namespaceSegments);
+                    if (captures != null)
+                    {
+                        return true;
+                    }
+                }
+
+                captures = null;
+                return false;
             }
 
             private static void AddResolved(
@@ -411,6 +510,15 @@ namespace Arch.Analyzer
                 if (_assemblies.Matches(assemblySegments))
                 {
                     return true;
+                }
+
+                for (var i = 0; i < _captures.Length; i++)
+                {
+                    var pattern = _captures[i];
+                    if (pattern.Matches(pattern.IsAssembly ? assemblySegments : namespaceSegments))
+                    {
+                        return true;
+                    }
                 }
 
                 for (var i = 0; i < _nameSuffixes.Length; i++)

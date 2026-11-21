@@ -14,6 +14,11 @@ git `vX.Y.Z` (MinVer).
   contém o tipo (`ContainingAssembly.Identity.Name`, inclusive tipos de metadata), com a mesma semântica
   de curinga do `namespace` (`*`, `**`, nome exato). As regras existentes passam a valer entre projetos
   (#23).
+- **Placeholders `[Nome]`** em critérios `namespace`/`assembly` (um segmento, capturado; combinam com `*`/`**`)
+  e campo opcional **`when`** (`same`/`differ`) em `forbidden-call` e `must-route-through`, para isolar
+  módulos sem uma regra por par (`Acme.[Module].Services.**` não chama `Acme.[Module].Domain.**` de outro
+  módulo). Placeholder malformado/repetido → `ARCH9001`; `when` com nome não capturado → `ARCH9008`.
+  `ILayerResolver.GetCaptures` expõe as capturas (#24).
 
 ## [0.1.0] - 2026-11-17
 

@@ -142,7 +142,12 @@ aplicado depois do `match`. `namespace` aceita `*` (exatamente um segmento) e `*
 mesmo, nunca os descendentes. `assembly` compara o padrão com o nome do assembly que contém o tipo
 (`ContainingAssembly.Identity.Name`, também para tipos vindos de referências), com a mesma semântica de
 curinga do `namespace` — assim as regras existentes valem entre projetos
-(`assembly: "Acme.Infrastructure.**"`). `baseType`/`implements`/`attribute` pedem o nome totalmente
+(`assembly: "Acme.Infrastructure.**"`). Em `namespace` e `assembly`, um segmento `[Nome]`
+(`Nome` = letra seguida de letras/dígitos) casa **exatamente um** segmento e **captura** o valor
+(`Acme.[Module].Services.**` captura `Vendas` em `Acme.Vendas.Services.PedidoService`); combina com `*` e
+`**`, o nome é único por padrão, e placeholder malformado ou repetido é `ARCH9001`. Por tipo e por camada
+vale a captura do primeiro critério de `match` **com placeholder**, na ordem declarada, que casar
+(`exclude` não captura); as capturas alimentam o campo `when` das regras (abaixo). `baseType`/`implements`/`attribute` pedem o nome totalmente
 qualificado; um nome que não resolve na compilação gera `ARCH9004` e o critério é ignorado.
 
 **Severidades.** Os nomes são livres (`bloqueante`, `aviso`…); os valores são só os cinco que o
@@ -170,8 +175,8 @@ obrigatório ausente, chave que o tipo não aceita ou valor inválido → regra 
 
 | `type` | Obrigatórios | Opcionais | Semântica |
 |---|---|---|---|
-| `forbidden-call` | `from`, `to` | — | Nenhum tipo da camada `from` pode invocar método, criar instância ou ler propriedade/campo de um tipo da camada `to`. |
-| `must-route-through` | `from`, `to` | `through` | Mesma detecção de `forbidden-call` (é açúcar sobre ele). `through` (lista de camadas) só alimenta a mensagem (`{through}`) — o caminho real `from → through → to` **não** é verificado. |
+| `forbidden-call` | `from`, `to` | `when` | Nenhum tipo da camada `from` pode invocar método, criar instância ou ler propriedade/campo de um tipo da camada `to`. `when` restringe a regra às capturas `[Nome]` das camadas: `{ same: [Nome, ...] }` só reporta quando os valores capturados são iguais nos dois lados, `{ differ: [Nome, ...] }` quando ao menos um difere (um escalar solto vale como lista de um item). Lado sem a captura → o par não é reportado; nome não capturado por nenhuma das duas camadas → `ARCH9008`. Ex.: `from: ModuleServices`, `to: ModuleDomain`, `when: { differ: [Module] }` com `Acme.[Module].Services.**` / `Acme.[Module].Domain.**`. |
+| `must-route-through` | `from`, `to` | `through`, `when` | Mesma detecção de `forbidden-call` (é açúcar sobre ele), inclusive `when`. `through` (lista de camadas) só alimenta a mensagem (`{through}`) — o caminho real `from → through → to` **não** é verificado. |
 | `naming-convention` | `layer`, `require` | — | Todo tipo da camada `layer` precisa obedecer `require: { suffix: X }` ou `require: { prefix: X }` — exatamente um par. |
 | `max-dependencies` | `layer`, `max`, `countBy` | — | Tipo da camada `layer` não pode ter mais que `max` (inteiro ≥ 0) dependências **distintas**; limite inclusivo. `countBy`: `constructor-parameters` (maior construtor público), `fields` (campos de instância `private`/`protected` do próprio tipo, não primitivos) ou `all` (união das duas). |
 

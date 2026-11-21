@@ -74,6 +74,13 @@ com **exatamente uma** chave de critério (zero ou duas → `ARCH9001`).
 | `attribute` | o tipo tem esse atributo aplicado | o nome é o da classe do atributo, **com** o sufixo `Attribute` (`Acme.AggregateRootAttribute`). |
 | `assembly` | o nome do assembly que contém o tipo bate com o padrão | `ContainingAssembly.Identity.Name`, também para tipos de referências (metadata). Mesma semântica de curinga do `namespace` (`*` = um segmento, `**` = zero ou mais, sem curinga = nome exato). Permite isolar projetos: `assembly: "Acme.Infrastructure.**"`. |
 
+**Placeholders `[Nome]` (em `namespace` e `assembly`).** Um segmento `[Nome]` casa **exatamente um**
+segmento e **captura** o valor sob `Nome` (`[A-Za-z][A-Za-z0-9]*`, único por padrão, combinável com `*` e
+`**`): `Acme.[Module].Services.**` captura `Vendas` em `Acme.Vendas.Services.PedidoService`. Placeholder
+malformado (`[Mod`, `[]`, `[1x]`, `Meu[Module]`) ou repetido no mesmo padrão → `ARCH9001` (bloqueante,
+com linha/coluna). A captura é por (tipo, camada) e vale a do **primeiro critério de `match` com
+placeholder, na ordem declarada, que casar**; `exclude` não captura. Servem para o campo `when`.
+
 Pontos que costumam enganar:
 
 - Um mesmo tipo pode estar em **várias** camadas (todas que casarem e não excluírem).
@@ -112,9 +119,11 @@ não `countby`). Uma chave que o tipo não declara → `ARCH9008` (e a regra é 
 | --- | --- | --- | --- | --- |
 | `forbidden-call` | `from` | sim | escalar não vazio | nome de camada |
 | | `to` | sim | escalar não vazio | nome de camada |
+| | `when` | **não** | mapa de **uma** chave → lista: `{ differ: [Module] }` (escalar solto = lista de 1) | chave `same` ou `differ`; valores = nomes de placeholder `[Nome]` capturados pelas camadas `from`/`to` |
 | `must-route-through` | `from` | sim | escalar | nome de camada |
 | | `to` | sim | escalar | nome de camada |
 | | `through` | **não** | lista (`[Service]`) ou escalar solto (lista de 1) | nomes de camada; só alimenta a mensagem |
+| | `when` | **não** | igual ao de `forbidden-call` | igual ao de `forbidden-call` |
 | `naming-convention` | `layer` | sim | escalar | nome de camada |
 | | `require` | sim | mapa de **um** par: `{ suffix: Repository }` | chave `suffix` ou `prefix`; valor = texto não vazio. Forma legada `suffix=Repository` também é aceita. |
 | `max-dependencies` | `layer` | sim | escalar | nome de camada |
@@ -133,6 +142,20 @@ Não são detectados: herança, tipos em assinaturas/campos/parâmetros de const
 Consequência prática: para "o Controller não pode depender de Repository", a camada `Repository` precisa
 cobrir também as **interfaces** que os controllers chamam (ex.: `nameSuffix: Repository`), senão a
 chamada é classificada no tipo que declara o membro e passa batida.
+
+`when` (também em `must-route-through`) condiciona a regra às capturas das camadas: `same: [A, B]` só
+reporta quando **todos** os nomes existem nos dois lados e são iguais; `differ: [A, B]` só quando todos
+existem nos dois lados e **ao menos um** difere. Lado sem a captura → o par não é reportado. Sem `when`,
+nada muda. Nome que **nenhum** critério de `match` das camadas `from` e `to` captura → `ARCH9008` (regra
+ignorada; checado sobre a config já mesclada com `extends`). Em `Extra` fica `"differ=Module,Tenant"`.
+
+```yaml
+layers:
+  ModuleServices: { match: [ { namespace: "Acme.[Module].Services.**" } ] }
+  ModuleDomain:   { match: [ { namespace: "Acme.[Module].Domain.**" } ] }
+rules:
+  - { id: ACME-010, slot: ARCH0010, type: forbidden-call, from: ModuleServices, to: ModuleDomain, when: { differ: [Module] } }
+```
 
 #### `must-route-through`
 
