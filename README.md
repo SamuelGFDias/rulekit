@@ -348,6 +348,25 @@ com a linha/coluna do problema.
   analisado. A lib previne deriva, não prova conformidade. `must-route-through` não verifica a rota.
 - **CLI exige runtime .NET 8+** (ver [Requisitos](#requisitos)).
 
+## Alternativas
+
+O [NsDepCop](https://github.com/realvizu/NsDepCop) é um analyzer Roslyn maduro (v3.3.0 em 11/2026)
+que verifica dependências entre namespaces e entre assemblies, com placeholders, superfície pública
+de namespace (`VisibleMembers`), herança de config por pasta e redução gradual de dívida
+(`AutoLowerMaxIssueCount`). Ele sublinha as violações no editor durante a digitação. Licença GPL-2.0.
+
+Prefira o NsDepCop quando a política é só "a camada X não depende da camada Y", definida por
+namespace ou assembly, e uma severidade única para todas as violações basta.
+
+O RuleKit se justifica quando você precisa de:
+
+- **severidade, `#pragma` e `.editorconfig` por regra**: cada regra tem seu slot; no NsDepCop todas as
+  violações de namespace saem como `NSDEPCOP01`;
+- **camadas que não são namespace**: `implements`, `baseType`, `attribute`, `nameSuffix`;
+- **regras além de dependência**: convenção de nome e número máximo de dependências;
+- **política de organização**: ID de negócio na mensagem, `extends` entre arquivos, schema versionado
+  e o CLI que gera `.globalconfig`, lock file e baseline.
+
 ## Skill para assistente de código
 
 O repositório traz uma skill em [`skills/rulekit-arch-rules`](https://github.com/SamuelGFDias/rulekit/tree/main/skills/rulekit-arch-rules) que guia um assistente como o Claude Code a configurar o RuleKit num projeto: diagnosticar o que já existe, levantar a arquitetura real (namespaces, projetos, sufixos), perguntar a política que você quer em vez de inventá-la, instalar os pacotes, escrever o `arch-rules.yaml`, rodar `arch-rules gen`, conferir o build e montar o job de CI. As referências cobrem o YAML completo, todos os diagnósticos `ARCH9xxx` e o CLI.
