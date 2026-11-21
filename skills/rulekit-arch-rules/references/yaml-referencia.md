@@ -146,7 +146,7 @@ chamada é classificada no tipo que declara o membro e passa batida.
 `when` (também em `must-route-through`) condiciona a regra às capturas das camadas: `same: [A, B]` só
 reporta quando **todos** os nomes existem nos dois lados e são iguais; `differ: [A, B]` só quando todos
 existem nos dois lados e **ao menos um** difere. Lado sem a captura → o par não é reportado. Sem `when`,
-nada muda. Nome que **nenhum** critério de `match` das camadas `from` e `to` captura → `ARCH9008` (regra
+nada muda. Nome que não seja capturado por ao menos um critério de `match` da camada `from` **e** por ao menos um da camada `to` → `ARCH9008` (regra
 ignorada; checado sobre a config já mesclada com `extends`). Em `Extra` fica `"differ=Module,Tenant"`.
 
 ```yaml

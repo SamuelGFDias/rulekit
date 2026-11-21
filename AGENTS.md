@@ -214,7 +214,7 @@ fixa contratos compartilhados (interfaces, trechos do ADR) no prompt de cada del
   (`exclude` não captura), memoizado junto com `GetLayers`. `when: { same|differ: [Nome] }`
   (`RuleFieldKind.KeyList`, `Extra` `"differ=A,B"`) é aplicado em `ForbiddenCallEvaluator` (herdado por
   `must-route-through`); lado sem a captura → não reporta. `RuleConditionValidator` valida os nomes de
-  `when` **após o merge de `extends`** (`ARCH9008` se nenhuma das camadas `from`/`to` captura o nome).
+  `when` **após o merge de `extends`** (`ARCH9008` se o nome não for capturado por ao menos um critério de `match` da camada `from` **e** por ao menos um da camada `to`).
 - **`SlotPool`** (`src/Arch.Config/SlotPool.cs`) — tamanho do pool (512), formato `ARCH` + 4 dígitos ASCII
   e normalização (trim, sem diferenciar caixa) numa só fonte, usada pelo parser, por
   `ArchDiagnostics.TryGetSlot` (analyzer) e por `SlotValidator` (CLI) — os três dão o mesmo veredito.
