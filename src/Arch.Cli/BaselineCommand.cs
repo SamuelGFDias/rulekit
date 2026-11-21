@@ -20,18 +20,47 @@ namespace Arch.Cli
     }
 
     /// <summary>
-    /// <c>arch-rules baseline &lt;sarif&gt;... [--update | --check] [--strict]</c> (issue #25). O analyzer não faz I/O
+    /// <c>arch-rules baseline &lt;sarif&gt;... [--update | --check] [--root &lt;dir&gt;] [--strict]</c> (issue #25). O analyzer não faz I/O
     /// (RS1035) e o CLI não compila código, então o baseline sai do log SARIF do build
     /// (<c>-p:ErrorLog=build.sarif,version=2.1</c>): cada violação de slot vira uma entrada
     /// <c>{ rule, file, subject }</c> no <c>arch-rules.baseline.yaml</c> do diretório ancestral mais próximo que
     /// contém <c>arch-rules.yaml</c>, com o caminho relativo a esse diretório. O <c>DiagnosticSuppressor</c> do
-    /// pacote lê o arquivo e suprime os diagnósticos que casam.
+    /// pacote lê o arquivo e suprime os diagnósticos que casam. Além dos diretórios que aparecem no SARIF, o
+    /// comando descobre todo <c>arch-rules.baseline.yaml</c> sob <c>--root</c> (padrão: diretório atual): um
+    /// baseline cujas violações todas foram corrigidas não tem resultado nenhum no SARIF e, sem isso, escaparia
+    /// do <c>--check</c>/<c>--update</c>.
     /// </summary>
     public static class BaselineCommand
     {
         private const string ConfigFileName = "arch-rules.yaml";
 
-        public static int Run(IReadOnlyList<string> sarifPaths, BaselineMode mode, TextWriter output, bool strict = false)
+        private static readonly string[] IgnoredDirectories = { "bin", "obj", ".git", "node_modules" };
+
+        /// <param name="root">Diretório sob o qual os baselines são descobertos; null = diretório atual.</param>
+        public static int Run(
+            IReadOnlyList<string> sarifPaths,
+            BaselineMode mode,
+            TextWriter output,
+            bool strict = false,
+            string root = null)
+        {
+            try
+            {
+                return RunCore(sarifPaths, mode, output, strict, root);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                output.WriteLine("ERRO " + ex.Message);
+                return 1;
+            }
+        }
+
+        private static int RunCore(
+            IReadOnlyList<string> sarifPaths,
+            BaselineMode mode,
+            TextWriter output,
+            bool strict,
+            string root)
         {
             var violations = new List<SarifViolation>();
             var warnings = new List<string>();
@@ -73,10 +102,67 @@ namespace Arch.Cli
                 output.WriteLine("AVISO " + warning);
             }
 
+            var rootDirectory = Path.GetFullPath(string.IsNullOrEmpty(root) ? Directory.GetCurrentDirectory() : root);
+            if (!Directory.Exists(rootDirectory))
+            {
+                output.WriteLine($"ERRO --root '{rootDirectory}' não é um diretório existente.");
+                return 1;
+            }
+
+            var discovered = DiscoverBaselineDirectories(rootDirectory);
+            foreach (var directory in discovered)
+            {
+                if (!byDirectory.ContainsKey(directory))
+                {
+                    byDirectory[directory] = new HashSet<BaselineEntry>();
+                }
+            }
+
             var directories = byDirectory.Keys.OrderBy(d => d, StringComparer.Ordinal).ToList();
             return mode == BaselineMode.Regenerate
                 ? Regenerate(directories, byDirectory, output)
                 : UpdateOrCheck(directories, byDirectory, mode, output);
+        }
+
+        /// <summary>Diretórios sob <paramref name="root"/> (recursivo) que têm <c>arch-rules.baseline.yaml</c>.</summary>
+        private static List<string> DiscoverBaselineDirectories(string root)
+        {
+            var found = new List<string>();
+            var pending = new Stack<string>();
+            pending.Push(root);
+
+            while (pending.Count > 0)
+            {
+                var directory = pending.Pop();
+                if (File.Exists(Path.Combine(directory, BaselineFile.FileName)))
+                {
+                    found.Add(directory);
+                }
+
+                IEnumerable<string> children;
+                try
+                {
+                    children = Directory.EnumerateDirectories(directory).ToList();
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    continue;
+                }
+
+                foreach (var child in children)
+                {
+                    var name = Path.GetFileName(child);
+                    if (IgnoredDirectories.Contains(name, StringComparer.Ordinal)
+                        || (File.GetAttributes(child) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        continue;
+                    }
+
+                    pending.Push(child);
+                }
+            }
+
+            return found;
         }
 
         private static Dictionary<string, HashSet<BaselineEntry>> GroupByProjectDirectory(
@@ -143,13 +229,20 @@ namespace Arch.Cli
             foreach (var directory in directories)
             {
                 var path = Path.Combine(directory, BaselineFile.FileName);
-                File.WriteAllText(path, BaselineFile.Write(byDirectory[directory]));
-                output.WriteLine($"Gerado: {path} ({byDirectory[directory].Count} entrada(s))");
+                var count = byDirectory[directory].Count;
+                if (!TryWrite(path, BaselineFile.Write(byDirectory[directory]), output))
+                {
+                    return 1;
+                }
+
+                output.WriteLine(count == 0
+                    ? $"Gerado: {path} (vazio: nenhuma violação no SARIF para este diretório; entries: [])"
+                    : $"Gerado: {path} ({count} entrada(s))");
             }
 
             if (directories.Count == 0)
             {
-                output.WriteLine("Nenhuma violação de slot com archRuleId/archSubject no SARIF: nada gerado.");
+                output.WriteLine("Nenhuma violação de slot com archRuleId/archSubject no SARIF e nenhum baseline sob --root: nada gerado.");
             }
 
             return 0;
@@ -172,7 +265,19 @@ namespace Arch.Cli
                     continue;
                 }
 
-                var parsed = BaselineFile.Parse(File.ReadAllText(path));
+                string text;
+                try
+                {
+                    text = File.ReadAllText(path);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    output.WriteLine($"ERRO {path}: {ex.Message}");
+                    failed = true;
+                    continue;
+                }
+
+                var parsed = BaselineFile.Parse(text);
                 if (!parsed.IsValid)
                 {
                     foreach (var error in parsed.Errors)
@@ -184,7 +289,9 @@ namespace Arch.Cli
                     continue;
                 }
 
-                var current = byDirectory[directory];
+                var current = byDirectory.TryGetValue(directory, out var entriesInSarif)
+                    ? entriesInSarif
+                    : new HashSet<BaselineEntry>();
                 plans.Add((path, parsed.Entries.ToList(), parsed.Entries.Where(e => !current.Contains(e)).ToList()));
             }
 
@@ -211,8 +318,15 @@ namespace Arch.Cli
                 }
                 else
                 {
-                    File.WriteAllText(plan.Path, BaselineFile.Write(plan.Existing.Except(plan.Obsolete)));
-                    output.WriteLine($"Atualizado: {plan.Path} ({plan.Obsolete.Count} entrada(s) obsoleta(s) removida(s)):");
+                    var remaining = plan.Existing.Except(plan.Obsolete).ToList();
+                    if (!TryWrite(plan.Path, BaselineFile.Write(remaining), output))
+                    {
+                        return 1;
+                    }
+
+                    output.WriteLine(remaining.Count == 0
+                        ? $"Atualizado: {plan.Path} ({plan.Obsolete.Count} entrada(s) obsoleta(s) removida(s); baseline vazio, mantido com entries: []):"
+                        : $"Atualizado: {plan.Path} ({plan.Obsolete.Count} entrada(s) obsoleta(s) removida(s)):");
                 }
 
                 foreach (var entry in plan.Obsolete.OrderBy(e => e.File, StringComparer.Ordinal).ThenBy(e => e.Rule, StringComparer.Ordinal))
@@ -223,10 +337,24 @@ namespace Arch.Cli
 
             if (plans.Count == 0)
             {
-                output.WriteLine("Nenhum baseline existente nos diretórios do SARIF: nada a fazer.");
+                output.WriteLine("Nenhum baseline existente sob --root nem nos diretórios do SARIF: nada a fazer.");
             }
 
             return hasObsolete ? 1 : 0;
+        }
+
+        private static bool TryWrite(string path, string content, TextWriter output)
+        {
+            try
+            {
+                File.WriteAllText(path, content);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                output.WriteLine($"ERRO {path}: {ex.Message}");
+                return false;
+            }
         }
     }
 }

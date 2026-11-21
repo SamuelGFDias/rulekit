@@ -65,8 +65,8 @@
       "properties": {
         "namespace": {
           "type": "string",
-          "description": "Padrao de namespace, aceita '*' (um segmento), '**' (qualquer profundidade) e placeholders '[Nome]' (exatamente um segmento, que e capturado; Nome = letra seguida de letras/digitos, unico por padrao — a unicidade nao e expressavel neste schema, o parser rejeita repeticao), ex.: 'Acme.Api.Controllers.**' ou 'Acme.[Module].Services.**'. Placeholder malformado ou repetido gera ARCH9001.",
-          "pattern": "^$|^(?:[^.\\[\\]]+|\\[[A-Za-z][A-Za-z0-9]*\\])(?:\\.(?:[^.\\[\\]]+|\\[[A-Za-z][A-Za-z0-9]*\\]))*$"
+          "description": "Padrao de namespace, aceita '*' (um segmento), '**' (qualquer profundidade) e placeholders '[Nome]' (exatamente um segmento, que e capturado; Nome = letra seguida de letras/digitos, unico por padrao — a unicidade nao e expressavel neste schema, o parser rejeita repeticao), ex.: 'Acme.Api.Controllers.**' ou 'Acme.[Module].Services.**'. Segmentos vazios (ponto sobrando) e espacos nas pontas dos segmentos sao tolerados pelo parser, e o pattern os aceita. Placeholder malformado ou repetido gera ARCH9001.",
+          "pattern": "^(?:\\s*\\[[A-Za-z][A-Za-z0-9]*\\]\\s*|[^.\\[\\]]*)(?:\\.(?:\\s*\\[[A-Za-z][A-Za-z0-9]*\\]\\s*|[^.\\[\\]]*))*$"
         },
         "nameSuffix": {
           "type": "string",
@@ -87,7 +87,7 @@
         "assembly": {
           "type": "string",
           "description": "Padrao do nome do assembly que contem o tipo (ContainingAssembly.Identity.Name), com a mesma semantica de curinga do namespace: '*' (um segmento), '**' (zero ou mais), '[Nome]' (um segmento, capturado), sem curinga = nome exato. Ex.: 'Acme.Infrastructure.**'.",
-          "pattern": "^$|^(?:[^.\\[\\]]+|\\[[A-Za-z][A-Za-z0-9]*\\])(?:\\.(?:[^.\\[\\]]+|\\[[A-Za-z][A-Za-z0-9]*\\]))*$"
+          "pattern": "^(?:\\s*\\[[A-Za-z][A-Za-z0-9]*\\]\\s*|[^.\\[\\]]*)(?:\\.(?:\\s*\\[[A-Za-z][A-Za-z0-9]*\\]\\s*|[^.\\[\\]]*))*$"
         }
       },
       "oneOf": [
@@ -284,47 +284,56 @@
           "description": "Usado por max-dependencies (OBRIGATORIO): como contar — 'constructor-parameters' (tipos distintos dos parametros do maior construtor publico), 'fields' (tipos distintos de campos de instancia privados/protegidos declarados no tipo, nao primitivos) ou 'all' (uniao das duas contagens). Contagem por TIPO distinto, nao por ocorrencia."
         },
         "when": {
-          "type": "object",
-          "description": "Usado por forbidden-call e must-route-through (OPCIONAL): condicao sobre as capturas '[Nome]' das camadas 'from' e 'to'. Exatamente uma chave: 'same' (so reporta quando todos os valores capturados sao iguais nos dois lados) ou 'differ' (so reporta quando ao menos um difere); o valor e a lista de nomes (um escalar solto vale como lista de um item). Lado sem a captura: a regra nao se aplica ao par. Nome que nao seja capturado por um criterio de match da camada from E por um da camada to gera ARCH9008 (regra ignorada).",
-          "additionalProperties": false,
-          "minProperties": 1,
-          "maxProperties": 1,
-          "properties": {
-            "same": {
-              "description": "Nomes cujos valores capturados devem ser iguais nos dois lados.",
-              "anyOf": [
-                {
-                  "type": "array",
-                  "minItems": 1,
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  }
+          "description": "Usado por forbidden-call e must-route-through (OPCIONAL): condicao sobre as capturas '[Nome]' das camadas 'from' e 'to'. Exatamente uma chave: 'same' (so reporta quando todos os valores capturados sao iguais nos dois lados) ou 'differ' (so reporta quando ao menos um difere); o valor e a lista de nomes (um escalar solto vale como lista de um item). Lado sem a captura: a regra nao se aplica ao par. Nome que nao seja capturado por um criterio de match da camada from E por um da camada to gera ARCH9008 (regra ignorada). Forma escalar legada (aceita pelo parser): 'differ=Nome1,Nome2' ou 'same=Nome' (uma string chave=lista separada por virgulas).",
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "maxProperties": 1,
+              "properties": {
+                "same": {
+                  "description": "Nomes cujos valores capturados devem ser iguais nos dois lados.",
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  ]
                 },
-                {
-                  "type": "string",
-                  "minLength": 1
+                "differ": {
+                  "description": "Nomes dos quais ao menos um valor capturado deve diferir entre os dois lados.",
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  ]
                 }
-              ]
+              }
             },
-            "differ": {
-              "description": "Nomes dos quais ao menos um valor capturado deve diferir entre os dois lados.",
-              "anyOf": [
-                {
-                  "type": "array",
-                  "minItems": 1,
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                {
-                  "type": "string",
-                  "minLength": 1
-                }
-              ]
+            {
+              "type": "string",
+              "minLength": 1,
+              "description": "Forma legada: 'same=Nome1,Nome2' ou 'differ=Nome1,Nome2'."
             }
-          }
+          ]
         }
       },
       "allOf": [

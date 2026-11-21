@@ -202,6 +202,64 @@ public class OrderStore { }
             Assert.Equal(4, span.StartLinePosition.Character);
         }
 
+        [Theory]
+        [InlineData("ARCH9003")]
+        [InlineData("ARCH9001")]
+        [InlineData("ARCH0513")]
+        [InlineData("CS0168")]
+        public async Task Nao_suprime_motor_nem_diagnostico_de_outro_id_mesmo_com_as_mesmas_properties(string foreignId)
+        {
+            // Mesmas Properties (archRuleId/archSubject) e mesmo arquivo de uma entrada do baseline, mas o ID não é
+            // um slot ARCH0001..ARCH0512: não há SuppressionDescriptor para ele e nada pode ser suprimido.
+            var compilation = CSharpCompilation.Create(
+                "BaselineSample",
+                new[] { CSharpSyntaxTree.ParseText(Code, path: SourcePath) },
+                TestCompilations.Create("class X {}").References,
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            var files = ImmutableArray.Create<AdditionalText>(
+                new InMemoryAdditionalText(BaselinePath, Baseline(Entry("ACME-001", "Services/OrderController.cs", LoadSubject))));
+
+            var diagnostics = await compilation
+                .WithAnalyzers(
+                    ImmutableArray.Create<DiagnosticAnalyzer>(new ForeignIdAnalyzer(foreignId), new BaselineSuppressor()),
+                    new CompilationWithAnalyzersOptions(
+                        new AnalyzerOptions(files),
+                        onAnalyzerException: null,
+                        concurrentAnalysis: true,
+                        logAnalyzerExecutionTime: false,
+                        reportSuppressedDiagnostics: true))
+                .GetAnalyzerDiagnosticsAsync(CancellationToken.None);
+
+            var foreign = Assert.Single(diagnostics, d => d.Id == foreignId);
+            Assert.Equal("ACME-001", foreign.Properties["archRuleId"]);
+            Assert.False(foreign.IsSuppressed);
+        }
+
+        private sealed class ForeignIdAnalyzer : DiagnosticAnalyzer
+        {
+            private readonly DiagnosticDescriptor _descriptor;
+
+            public ForeignIdAnalyzer(string id)
+            {
+                _descriptor = new DiagnosticDescriptor(id, "t", "m", "c", DiagnosticSeverity.Warning, isEnabledByDefault: true);
+            }
+
+            public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => ImmutableArray.Create(_descriptor);
+
+            public override void Initialize(AnalysisContext context)
+            {
+                context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
+                context.EnableConcurrentExecution();
+                context.RegisterSyntaxTreeAction(c =>
+                {
+                    var properties = ImmutableDictionary<string, string>.Empty
+                        .Add("archRuleId", "ACME-001")
+                        .Add("archSubject", LoadSubject);
+                    c.ReportDiagnostic(Diagnostic.Create(_descriptor, Location.Create(c.Tree, default), properties));
+                });
+            }
+        }
+
         [Fact]
         public async Task Baseline_valido_nao_gera_ARCH9009()
         {

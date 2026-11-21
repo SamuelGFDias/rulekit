@@ -157,6 +157,7 @@ dotnet build -p:ErrorLog=build.sarif%2Cversion=2.1    # a vírgula é escapada (
 dotnet arch-rules baseline build.sarif                # gera o baseline ao lado do arch-rules.yaml; comite
 dotnet arch-rules baseline build.sarif --check        # CI: sai 1 se uma entrada ficou obsoleta
 dotnet arch-rules baseline build.sarif --update       # encolhe: remove as obsoletas, nunca acrescenta
+# --root <dir> (padrão: diretório atual) acha também os baselines sem resultado nenhum no SARIF
 ```
 
 O baseline só vale para o diretório do `arch-rules.yaml` mais próximo da violação; baseline inválido →
@@ -192,8 +193,9 @@ O baseline só vale para o diretório do `arch-rules.yaml` mais próximo da viol
   `to` com `through` na mensagem.
 - **Baseline** (`arch-rules.baseline.yaml`): casa por regra + arquivo + assunto, **sem linha**; todas as
   ocorrências iguais são suprimidas. O SARIF precisa vir de um build com o analyzer desta versão (traz
-  `archRuleId`/`archSubject`); se a **última** violação de um projeto for corrigida, o `--check`/`--update`
-  não vê mais o diretório — apague o baseline à mão.
+  `archRuleId`/`archSubject`); se a **última** violação de um projeto for corrigida, o baseline dele fica
+  sem resultado no SARIF e o `--check` sai 1 (o `--update` o deixa com `entries: []`) — desde que o
+  comando rode na raiz do repositório ou com `--root`, que é onde ele procura os baselines.
 - **`message:`** só é usado por `forbidden-call` e `must-route-through`; os outros dois ignoram.
 - **Silenciar/ajustar por regra** funciona por slot: `#pragma warning disable ARCH0007` e
   `dotnet_diagnostic.ARCH0007.severity = none` num `.editorconfig`. Preferível: mudar `severity`/`enabled`

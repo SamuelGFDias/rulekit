@@ -269,8 +269,11 @@ fixa contratos compartilhados (interfaces, trechos do ADR) no prompt de cada del
   AdditionalFile de nome exato `arch-rules.baseline.yaml` (sem I/O, cache por `SourceText`) e suprime
   quando regra + caminho (sem caixa, `\`→`/`) + assunto casam — todas as ocorrências, sem contagem;
   vale também para slots com severidade `error`. O analyzer **não** trata o baseline como config nem
-  `extends` (só procura `arch-rules.yaml`). Limite: `--check`/`--update` só veem diretórios presentes no
-  SARIF; testes de suppressor precisam de `reportSuppressedDiagnostics: true` para enxergar o que foi
+  `extends` (só procura `arch-rules.yaml`). `arch-rules baseline` visita a união dos
+  diretórios do SARIF com todo `arch-rules.baseline.yaml` achado sob `--root` (padrão: diretório atual;
+  ignora `bin/obj/.git/node_modules`): baseline sem nenhum resultado no SARIF tem todas as entradas
+  obsoletas (`--check` sai 1; `--update` deixa `entries: []`; regenerar também zera). Erros de I/O viram
+  `ERRO ...` com exit 1. Testes de suppressor precisam de `reportSuppressedDiagnostics: true` para enxergar o que foi
   suprimido.
 - **Convenção de nome `arch-rules.*.yaml` para `extends`.** Só arquivos nesse padrão (ao lado do
   `.csproj`, exceto `arch-rules.yaml` e o `arch-rules.lock.yaml` gerado pelo CLI) entram

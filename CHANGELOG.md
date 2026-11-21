@@ -19,11 +19,14 @@ git `vX.Y.Z` (MinVer).
   módulos sem uma regra por par (`Acme.[Module].Services.**` não chama `Acme.[Module].Domain.**` de outro
   módulo). Placeholder malformado/repetido → `ARCH9001`; `when` com nome que não seja capturado pela camada `from` **e** pela `to` → `ARCH9008`.
   `ILayerResolver.GetCaptures` expõe as capturas (#24).
-- **Baseline de violações** (#25): `arch-rules baseline <sarif>... [--update | --check] [--strict]` gera
+- **Baseline de violações** (#25): `arch-rules baseline <sarif>... [--update | --check] [--root <dir>] [--strict]` gera
   `arch-rules.baseline.yaml` (`schema: arch-rules-baseline/v1`) a partir do log SARIF do build
   (`-p:ErrorLog=build.sarif%2Cversion=2.1`), no diretório do `arch-rules.yaml` mais próximo de cada violação,
   com uma entrada `{ rule, file, subject }` por violação, sem número de linha. `--update` é o ratchet (só
-  remove) e `--check` sai 1 com entrada obsoleta (CI). Um `DiagnosticSuppressor` do pacote (`ARCHB0001`…
+  remove) e `--check` sai 1 com entrada obsoleta (CI). `--root` (padrão: diretório atual) descobre
+  recursivamente todo `arch-rules.baseline.yaml` (ignora `bin/obj/.git/node_modules`), de modo que um baseline
+  cujas violações foram todas corrigidas — sem resultado nenhum no SARIF — também seja detectado (`--check`
+  exit 1, `--update` deixa `entries: []`). Erro de I/O vira `ERRO ...` com exit 1. Um `DiagnosticSuppressor` do pacote (`ARCHB0001`…
   `ARCHB0512`) suprime os diagnósticos de slot que casam; a supressão aparece no SARIF. Os avaliadores passam a
   gravar `archSubject` (e, em `naming-convention`/`max-dependencies`, também `archRuleId`/`archRuleType`) em
   `Diagnostic.Properties`. Novo **`ARCH9009`** (Warning) para baseline inválido, com linha/coluna; nesse caso

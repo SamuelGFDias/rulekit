@@ -26,7 +26,7 @@ local com `--add-source <dir-dos-nupkg>`.
 ```text
 arch-rules gen <caminho-do-yaml> [--out <diretorio>] [--strict]
 arch-rules validate <caminho-do-yaml> [--strict]
-arch-rules baseline <sarif>... [--update | --check] [--strict]
+arch-rules baseline <sarif>... [--update | --check] [--root <diretorio>] [--strict]
 arch-rules -h | --help
 ```
 
@@ -134,12 +134,14 @@ ancestral → `AVISO` e ignorado.
 | (sem flag) | Regenera o baseline de cada diretório com **todos** os resultados (pode acrescentar). | 0 |
 | `--update` | Ratchet: mantém só as entradas existentes que ainda aparecem; **nunca acrescenta**; diretório sem baseline é ignorado. | 0 (1 se um baseline existente é inválido) |
 | `--check` | Não escreve; lista as entradas obsoletas. | **1** se alguma entrada de baseline existente não aparece mais; 0 caso contrário |
+| `--root <dir>` | Onde procurar, recursivamente, todo `arch-rules.baseline.yaml` (ignora `bin/obj/.git/node_modules`); padrão: diretório atual. Baseline sem nenhum resultado no SARIF → todas as entradas obsoletas. | — |
 | `--strict` | Aviso (fonte sem `arch-rules.yaml`, resultado sem `archRuleId`/`archSubject`) vira erro; nada é escrito. | 1 |
 
 `--update` e `--check` juntos é erro de uso (saída 1). Baseline existente inválido em `--update`/`--check`
-→ `ERRO ... [ARCH9009]`, saída 1. Limite conhecido: só os diretórios que aparecem no SARIF são
-verificados; quando a última violação de um projeto é corrigida o diretório some do SARIF — apague o
-baseline à mão.
+→ `ERRO ... [ARCH9009]`, saída 1. O comando visita os diretórios do SARIF **e** todo baseline sob `--root`:
+quando a última violação de um projeto é corrigida, o baseline dele (sem resultado no SARIF) tem todas as
+entradas obsoletas — `--check` sai 1 e `--update` o deixa com `entries: []`. Rode na raiz do repositório ou
+passe `--root`. Erro de leitura/escrita → `ERRO ...`, saída 1.
 
 Formato do arquivo (`schema: arch-rules-baseline/v1`, subset de YAML do `arch-rules.yaml`, chave
 desconhecida é erro, escrito de forma determinística — ordenado por arquivo, regra e assunto):
