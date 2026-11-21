@@ -294,7 +294,7 @@ arch-rules baseline build.sarif --update
 ```
 
 ```text
-arch-rules baseline <sarif>... [--update | --check] [--strict]
+arch-rules baseline <sarif>... [--update | --check] [--root <diretório>] [--strict]
 ```
 
 | Modo | O que faz |
@@ -302,12 +302,16 @@ arch-rules baseline <sarif>... [--update | --check] [--strict]
 | (sem flag) | Regenera o `arch-rules.baseline.yaml` de cada diretório com **todas** as violações de slot do SARIF (pode acrescentar). |
 | `--update` | Ratchet: mantém só as entradas existentes que ainda aparecem no SARIF; nunca acrescenta. Diretório sem baseline é ignorado. |
 | `--check` | Não escreve nada; sai **1** se alguma entrada de um baseline existente não aparece mais no SARIF (lista as obsoletas), **0** caso contrário. |
+| `--root <dir>` | Diretório onde procurar, recursivamente, todo `arch-rules.baseline.yaml` (ignora `bin/`, `obj/`, `.git/` e `node_modules/`). Padrão: o diretório atual. |
 | `--strict` | Qualquer aviso (arquivo-fonte sem `arch-rules.yaml` em nenhum diretório ancestral, resultado sem `archRuleId`/`archSubject`) sai 1 e nada é escrito. |
 
 Aceita vários SARIFs (um por projeto da solução). Cada violação vai para o baseline do diretório ancestral
 mais próximo do arquivo-fonte que contém `arch-rules.yaml`, com o caminho relativo a esse diretório. Um
-baseline só enxerga os diretórios que aparecem no SARIF: se a **última** violação de um projeto for
-corrigida, esse diretório não aparece mais — apague o baseline à mão.
+baseline que o comando visita é a união dos diretórios do SARIF com todo `arch-rules.baseline.yaml`
+encontrado sob `--root`: se a **última** violação de um projeto for corrigida, o baseline dele não tem mais
+nenhum resultado no SARIF, e então todas as suas entradas são obsoletas — `--check` sai 1, `--update` o
+deixa com `entries: []` (o arquivo continua existindo) e a regeneração sem flag também o zera. Rode o
+comando na raiz do repositório (ou passe `--root`) para que nenhum baseline escape.
 
 O arquivo (`schema: arch-rules-baseline/v1`, subset de YAML do `arch-rules.yaml`, chave desconhecida é erro)
 tem uma entrada por violação, **sem número de linha**:

@@ -156,17 +156,29 @@ namespace Arch.Cli
 
         private static int RunBaseline(string[] args, TextWriter output, TextWriter error)
         {
-            const string usage = "Uso: arch-rules baseline <sarif>... [--update | --check] [--strict]";
+            const string usage = "Uso: arch-rules baseline <sarif>... [--update | --check] [--root <diretorio>] [--strict]";
             var sarifPaths = new System.Collections.Generic.List<string>();
             var mode = BaselineMode.Regenerate;
             var modeSet = false;
             var strict = false;
+            string root = null;
 
             for (var i = 1; i < args.Length; i++)
             {
                 if (args[i] == StrictOption)
                 {
                     strict = true;
+                }
+                else if (args[i] == "--root")
+                {
+                    if (i + 1 >= args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                    {
+                        error.WriteLine("--root exige um diretório.");
+                        error.WriteLine(usage);
+                        return 1;
+                    }
+
+                    root = args[++i];
                 }
                 else if (args[i] == "--update" || args[i] == "--check")
                 {
@@ -198,7 +210,7 @@ namespace Arch.Cli
                 return 1;
             }
 
-            return BaselineCommand.Run(sarifPaths, mode, output, strict);
+            return BaselineCommand.Run(sarifPaths, mode, output, strict, root);
         }
 
         private static void PrintUsage(TextWriter writer)
@@ -206,7 +218,7 @@ namespace Arch.Cli
             writer.WriteLine("Uso:");
             writer.WriteLine("  arch-rules gen <caminho-do-yaml> [--out <diretorio>] [--strict]");
             writer.WriteLine("  arch-rules validate <caminho-do-yaml> [--strict]");
-            writer.WriteLine("  arch-rules baseline <sarif>... [--update | --check] [--strict]");
+            writer.WriteLine("  arch-rules baseline <sarif>... [--update | --check] [--root <diretorio>] [--strict]");
             writer.WriteLine();
             writer.WriteLine("Opções:");
             writer.WriteLine("  --out <diretorio>  (gen) diretório de saída; padrão: ao lado do YAML.");
@@ -218,6 +230,9 @@ namespace Arch.Cli
             writer.WriteLine("                     cada violação. Sem flag: regenera com todas as violações do SARIF.");
             writer.WriteLine("    --update         ratchet: remove as entradas que não aparecem mais; nunca acrescenta.");
             writer.WriteLine("    --check          não escreve; sai 1 se algum baseline existente tem entrada obsoleta (CI).");
+            writer.WriteLine("    --root <dir>     diretório onde procurar, recursivamente, todo arch-rules.baseline.yaml (ignora");
+            writer.WriteLine("                     bin/, obj/, .git/, node_modules/); padrão: diretório atual. Baseline sem nenhum");
+            writer.WriteLine("                     resultado no SARIF tem todas as entradas obsoletas (--update o deixa com entries: []).");
             writer.WriteLine("                     Em 'baseline', --strict faz aviso (arquivo sem arch-rules.yaml, resultado sem");
             writer.WriteLine("                     archRuleId/archSubject) sair 1 sem escrever nada.");
             writer.WriteLine();

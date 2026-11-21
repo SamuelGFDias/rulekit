@@ -309,12 +309,9 @@ namespace Arch.Analyzer
         }
 
         /// <summary>
-        /// Descriptor da faixa reservada do motor correspondente ao <paramref name="code"/> que o
-        /// parser reportou (<c>SchemaValidationError.Code</c>). Um código desconhecido (ex.: uma
-        /// versão futura de Arch.Config reportando ARCH9006) não pode ser reportado como ele mesmo —
-        /// não está em SupportedDiagnostics — então cai para ARCH9001 quando bloqueia o arquivo e
-        /// ARCH9002 quando não bloqueia, com o código original preservado na mensagem por
-        /// <c>ArchRulesAnalyzer</c>.
+        /// <see cref="SuppressionDescriptor"/> do baseline (<c>ARCHB0001..ARCHB0512</c>) para o slot
+        /// <paramref name="slotId"/> (<c>ARCH0001..ARCH0512</c>), ou false para qualquer outro ID — a faixa
+        /// <c>ARCH9xxx</c> do motor nunca é suprimida pelo baseline.
         /// </summary>
         internal static bool TryGetBaselineSuppression(string slotId, out SuppressionDescriptor descriptor)
         {
@@ -327,6 +324,14 @@ namespace Arch.Analyzer
             return BaselineSuppressionBySlot.TryGetValue(slotId.Trim(), out descriptor);
         }
 
+        /// <summary>
+        /// Descriptor da faixa reservada do motor correspondente ao <paramref name="code"/> que o
+        /// parser reportou (<c>SchemaValidationError.Code</c>). Um código desconhecido (ex.: uma
+        /// versão futura de Arch.Config reportando ARCH9006) não pode ser reportado como ele mesmo —
+        /// não está em SupportedDiagnostics — então cai para ARCH9001 quando bloqueia o arquivo e
+        /// ARCH9002 quando não bloqueia, com o código original preservado na mensagem por
+        /// <c>ArchRulesAnalyzer</c>.
+        /// </summary>
         internal static DiagnosticDescriptor GetEngineDescriptorOrFallback(string code, bool isBlocking)
         {
             if (!string.IsNullOrWhiteSpace(code) && EngineById.TryGetValue(code.Trim(), out var descriptor))

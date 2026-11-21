@@ -72,10 +72,13 @@ namespace Arch.Cli.Tests
             return path;
         }
 
-        private static (int Exit, string Output) Run(BaselineMode mode, bool strict, params string[] sarifs)
+        private (int Exit, string Output) Run(BaselineMode mode, bool strict, params string[] sarifs)
+            => RunIn(_root, mode, strict, sarifs);
+
+        private static (int Exit, string Output) RunIn(string root, BaselineMode mode, bool strict, params string[] sarifs)
         {
             var output = new StringWriter();
-            var exit = BaselineCommand.Run(sarifs, mode, output, strict);
+            var exit = BaselineCommand.Run(sarifs, mode, output, strict, root);
             return (exit, output.ToString());
         }
 
@@ -342,6 +345,200 @@ namespace Arch.Cli.Tests
             Assert.Equal(1, exit);
             Assert.Contains("ERRO", output);
             Assert.Contains("ARCH9009", output);
+        }
+
+        // ---- --root: baselines sem nenhum resultado no SARIF -----------------------------------
+
+        [Fact]
+        public void Check_com_baseline_totalmente_obsoleto_sai_1_quando_o_sarif_nao_tem_resultado_do_diretorio()
+        {
+            var live = Project("live");
+            var stale = Project("stale");
+            File.WriteAllText(BaselineIn(live), BaselineFile.Write(new[] { new BaselineEntry("R", "A.cs", "S") }));
+            var before = BaselineFile.Write(new[] { new BaselineEntry("R", "Velho.cs", "corrigida") });
+            File.WriteAllText(BaselineIn(stale), before);
+            var sarif = Sarif("a.sarif", new[] { Result("ARCH0001", Uri(Path.Combine(live, "A.cs")), "R", "S") });
+
+            var (exit, output) = Run(BaselineMode.Check, false, sarif);
+
+            Assert.Equal(1, exit);
+            Assert.Contains(BaselineIn(stale), output);
+            Assert.Contains("corrigida", output);
+            Assert.Equal(before, File.ReadAllText(BaselineIn(stale)));
+        }
+
+        [Fact]
+        public void Check_com_sarif_sem_nenhum_resultado_de_slot_ainda_enxerga_os_baselines_sob_o_root()
+        {
+            var stale = Project("stale");
+            File.WriteAllText(BaselineIn(stale), BaselineFile.Write(new[] { new BaselineEntry("R", "A.cs", "S") }));
+            var sarif = Sarif("vazio.sarif", Array.Empty<string>());
+
+            Assert.Equal(1, Run(BaselineMode.Check, false, sarif).Exit);
+        }
+
+        [Fact]
+        public void Check_com_baseline_vazio_fora_do_sarif_continua_ok()
+        {
+            var dir = Project("p");
+            File.WriteAllText(BaselineIn(dir), BaselineFile.Write(Array.Empty<BaselineEntry>()));
+            var sarif = Sarif("vazio.sarif", Array.Empty<string>());
+
+            var (exit, output) = Run(BaselineMode.Check, false, sarif);
+
+            Assert.Equal(0, exit);
+            Assert.Contains("OK", output);
+        }
+
+        [Fact]
+        public void Update_remove_todas_as_entradas_do_baseline_obsoleto_e_mantem_o_arquivo_com_entries_vazio()
+        {
+            var stale = Project("stale");
+            File.WriteAllText(BaselineIn(stale), BaselineFile.Write(new[] { new BaselineEntry("R", "A.cs", "S") }));
+            var sarif = Sarif("vazio.sarif", Array.Empty<string>());
+
+            var (exit, output) = Run(BaselineMode.Update, false, sarif);
+
+            Assert.Equal(0, exit);
+            Assert.True(File.Exists(BaselineIn(stale)));
+            Assert.Empty(Entries(stale));
+            Assert.Contains("entries: []", File.ReadAllText(BaselineIn(stale)));
+            Assert.Contains("vazio", output);
+        }
+
+        [Fact]
+        public void Regenerar_zera_o_baseline_descoberto_sem_resultado_e_diz_isso()
+        {
+            var stale = Project("stale");
+            var fresh = Project("fresh");
+            File.WriteAllText(BaselineIn(stale), BaselineFile.Write(new[] { new BaselineEntry("R", "A.cs", "S") }));
+            var sarif = Sarif("a.sarif", new[] { Result("ARCH0001", Uri(Path.Combine(fresh, "B.cs")), "R", "S2") });
+
+            var (exit, output) = Run(BaselineMode.Regenerate, false, sarif);
+
+            Assert.Equal(0, exit);
+            Assert.Empty(Entries(stale));
+            Assert.Equal("B.cs", Assert.Single(Entries(fresh)).File);
+            Assert.Contains("vazio", output);
+        }
+
+        [Fact]
+        public void Root_so_alcanca_o_que_esta_embaixo_dele()
+        {
+            var inside = Project("a/inside");
+            var outside = Project("b/outside");
+            File.WriteAllText(BaselineIn(inside), BaselineFile.Write(new[] { new BaselineEntry("R", "A.cs", "S") }));
+            File.WriteAllText(BaselineIn(outside), BaselineFile.Write(new[] { new BaselineEntry("R", "A.cs", "S") }));
+            var sarif = Sarif("vazio.sarif", Array.Empty<string>());
+
+            var (exit, output) = RunIn(Path.Combine(_root, "a"), BaselineMode.Check, false, sarif);
+
+            Assert.Equal(1, exit);
+            Assert.Contains(BaselineIn(inside), output);
+            Assert.DoesNotContain(BaselineIn(outside), output);
+        }
+
+        [Theory]
+        [InlineData("bin")]
+        [InlineData("obj")]
+        [InlineData(".git")]
+        [InlineData("node_modules")]
+        public void Descoberta_ignora_bin_obj_git_e_node_modules(string ignored)
+        {
+            var dir = Project("p");
+            var copy = Path.Combine(dir, ignored, "nested");
+            Directory.CreateDirectory(copy);
+            File.WriteAllText(BaselineIn(copy), BaselineFile.Write(new[] { new BaselineEntry("R", "A.cs", "S") }));
+            var sarif = Sarif("vazio.sarif", Array.Empty<string>());
+
+            var (exit, output) = Run(BaselineMode.Check, false, sarif);
+
+            Assert.Equal(0, exit);
+            Assert.DoesNotContain(copy, output);
+        }
+
+        [Fact]
+        public void Program_aceita_root_e_rejeita_root_sem_valor()
+        {
+            var stale = Project("stale");
+            File.WriteAllText(BaselineIn(stale), BaselineFile.Write(new[] { new BaselineEntry("R", "A.cs", "S") }));
+            var sarif = Sarif("vazio.sarif", Array.Empty<string>());
+            var output = new StringWriter();
+            var error = new StringWriter();
+
+            Assert.Equal(1, Program.Run(new[] { "baseline", sarif, "--check", "--root", _root }, output, error));
+            Assert.Contains(BaselineIn(stale), output.ToString());
+            Assert.Equal(1, Program.Run(new[] { "baseline", sarif, "--root" }, output, error));
+            Assert.Contains("--root", error.ToString());
+        }
+
+        // ---- URI de arquivo do Windows e I/O ---------------------------------------------------
+
+        [Theory]
+        [InlineData("file:///C:/repo/src/A.cs")]
+        [InlineData("file:///home/x/A.cs")]
+        public void Uri_de_arquivo_sem_arch_rules_no_caminho_nunca_lanca_e_vira_aviso(string uri)
+        {
+            // Em Linux a URI 'C:/...' vira um caminho relativo sem ancestral com arch-rules.yaml (e
+            // '/home/x' idem): o contrato mínimo é não lançar e reportar AVISO, não ERRO (sem --strict).
+            var sarif = Sarif("a.sarif", new[] { Result("ARCH0001", uri, "R", "S") });
+
+            var (exit, output) = Run(BaselineMode.Regenerate, false, sarif);
+
+            Assert.Equal(0, exit);
+            Assert.Contains("AVISO", output);
+            Assert.Contains("arch-rules.yaml", output);
+        }
+
+        [Fact]
+        public void Erro_de_escrita_vira_ERRO_com_exit_1_sem_excecao()
+        {
+            var dir = Project();
+            Directory.CreateDirectory(BaselineIn(dir)); // um diretório no lugar do arquivo: escrita falha
+            var sarif = Sarif("a.sarif", new[] { Result("ARCH0001", Uri(Path.Combine(dir, "A.cs")), "R", "S") });
+
+            var (exit, output) = Run(BaselineMode.Regenerate, false, sarif);
+
+            Assert.Equal(1, exit);
+            Assert.Contains("ERRO", output);
+            Assert.Contains(BaselineIn(dir), output);
+        }
+
+        [Fact]
+        public void Erro_de_leitura_do_baseline_vira_ERRO_com_exit_1_sem_excecao()
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                return;
+            }
+
+            var dir = Project();
+            var path = BaselineIn(dir);
+            File.WriteAllText(path, BaselineFile.Write(new[] { new BaselineEntry("R", "A.cs", "S") }));
+            File.SetUnixFileMode(path, UnixFileMode.None);
+            try
+            {
+                try
+                {
+                    File.ReadAllText(path);
+                    return; // root ignora permissões: não há como provocar o erro aqui
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+
+                var sarif = Sarif("a.sarif", new[] { Result("ARCH0001", Uri(Path.Combine(dir, "A.cs")), "R", "S") });
+
+                var (exit, output) = Run(BaselineMode.Check, false, sarif);
+
+                Assert.Equal(1, exit);
+                Assert.Contains("ERRO", output);
+                Assert.Contains(path, output);
+            }
+            finally
+            {
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
         }
 
         // ---- entrada ---------------------------------------------------------------------------
